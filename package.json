@@ -1,0 +1,19 @@
+{
+  "name": "reddit-link-bot",
+  "version": "1.0.0",
+  "description": "Twitter bot that finds Reddit post links from screenshots",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun run --watch src/index.ts",
+    "test": "bun run src/index.ts --test"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "string-similarity": "^4.0.4"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/string-similarity": "^4.0.2"
+  }
+}

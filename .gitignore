@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Database
+data/
+*.db
+
+# Environment
+.env
+
+# Bun
+bun.lockb
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Claude
+.claude/
+
+# Cookies/Auth
+.twitter-cookie
+*.cookie
