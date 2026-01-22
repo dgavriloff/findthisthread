@@ -18,6 +18,9 @@ export function createServer(
 ) {
   const app = new Hono();
 
+  // Health check endpoint (for Railway)
+  app.get('/health', (c) => c.text('OK'));
+
   // Enable CORS for API routes
   app.use('/api/*', cors());
 
@@ -80,8 +83,22 @@ export function createServer(
 
   // Fallback to index.html for SPA routing
   app.get('*', async (c) => {
-    const html = await Bun.file('./public/index.html').text();
-    return c.html(html);
+    try {
+      const html = await Bun.file('./public/index.html').text();
+      return c.html(html);
+    } catch {
+      // If index.html not found, return a basic status page
+      return c.html(`
+        <!DOCTYPE html>
+        <html>
+        <head><title>FindThisThread Bot</title></head>
+        <body>
+          <h1>FindThisThread Bot</h1>
+          <p>Bot is running. <a href="/api/status">View API Status</a></p>
+        </body>
+        </html>
+      `);
+    }
   });
 
   return app;
