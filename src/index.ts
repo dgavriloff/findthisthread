@@ -66,6 +66,7 @@ async function main(): Promise<void> {
   const app = createServer(db, () => botState, triggerRefresh, (mentionId) => handler.reprocessMention(mentionId));
   const server = Bun.serve({
     port: PORT,
+    hostname: '0.0.0.0', // Bind to all interfaces (required for Railway/Docker)
     fetch: app.fetch,
   });
   console.log(`\nDashboard running at http://localhost:${server.port}`);
