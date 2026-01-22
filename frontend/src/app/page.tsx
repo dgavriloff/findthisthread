@@ -1,13 +1,9 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { RefreshCw, ExternalLink, CheckCircle, XCircle, Clock } from "lucide-react";
+import { RefreshCw, ExternalLink, Check, X, Clock, RotateCcw } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
-// Convert http(s) to ws(s) for WebSocket URL
 const WS_URL = API_URL.replace(/^http/, "ws") + "/ws";
 
 interface BotStatus {
@@ -15,11 +11,7 @@ interface BotStatus {
   nextCheckTime: number;
   pollIntervalMs: number;
   isRunning: boolean;
-  stats: {
-    total: number;
-    successful: number;
-    failed: number;
-  };
+  stats: { total: number; successful: number; failed: number };
   currentTime: number;
   timeUntilNextCheck: number;
 }
@@ -44,7 +36,6 @@ export default function Dashboard() {
   const [status, setStatus] = useState<BotStatus | null>(null);
   const [mentions, setMentions] = useState<Mention[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
   const [modalImage, setModalImage] = useState<string | null>(null);
@@ -53,47 +44,31 @@ export default function Dashboard() {
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
-
     setConnectionStatus("connecting");
     const ws = new WebSocket(WS_URL);
 
     ws.onopen = () => {
-      console.log("WebSocket connected");
       setConnectionStatus("connected");
-      setError(null);
     };
 
     ws.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data);
-
         switch (message.type) {
           case "init":
-            // Initial data on connect
             setStatus(message.data.status);
             setMentions(message.data.mentions);
             setLoading(false);
             break;
           case "tick":
-            // Timer update every second
             setStatus((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    currentTime: message.data.currentTime,
-                    timeUntilNextCheck: message.data.timeUntilNextCheck,
-                    lastCheckTime: message.data.lastCheckTime,
-                    nextCheckTime: message.data.nextCheckTime,
-                  }
-                : prev
+              prev ? { ...prev, ...message.data } : prev
             );
             break;
           case "status":
-            // Full status update
             setStatus(message.data);
             break;
           case "mentions":
-            // Mentions list update
             setMentions(message.data);
             break;
           case "refresh_ack":
@@ -104,24 +79,14 @@ export default function Dashboard() {
             break;
         }
       } catch (err) {
-        console.error("Failed to parse WebSocket message:", err);
+        console.error("WebSocket parse error:", err);
       }
     };
 
-    ws.onerror = (err) => {
-      console.error("WebSocket error:", err);
-    };
-
     ws.onclose = () => {
-      console.log("WebSocket disconnected");
       setConnectionStatus("disconnected");
       wsRef.current = null;
-
-      // Reconnect after 3 seconds
-      reconnectTimeoutRef.current = setTimeout(() => {
-        console.log("Attempting to reconnect...");
-        connect();
-      }, 3000);
+      reconnectTimeoutRef.current = setTimeout(connect, 3000);
     };
 
     wsRef.current = ws;
@@ -129,14 +94,9 @@ export default function Dashboard() {
 
   useEffect(() => {
     connect();
-
     return () => {
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      if (wsRef.current) wsRef.current.close();
     };
   }, [connect]);
 
@@ -156,172 +116,194 @@ export default function Dashboard() {
   const formatTime = (ms: number) => {
     const seconds = Math.floor(ms / 1000);
     const minutes = Math.floor(seconds / 60);
-    return minutes > 0 ? `${minutes}m ${seconds % 60}s` : `${seconds}s`;
+    const secs = seconds % 60;
+    return minutes > 0 ? `${minutes}m ${secs}s` : `${secs}s`;
   };
 
   const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleString();
+    const date = new Date(dateStr);
+    return date.toLocaleDateString(undefined, { month: "short", day: "numeric" }) +
+      " " + date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
   };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-      </div>
-    );
-  }
-
-  if (error && connectionStatus === "disconnected") {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <Card className="w-full max-w-md">
-          <CardHeader>
-            <CardTitle className="text-destructive">connection error</CardTitle>
-            <CardDescription>{error}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button onClick={connect} className="w-full">
-              <RefreshCw className="mr-2 h-4 w-4" /> retry
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
 
   const progressPercent = status
     ? Math.max(0, Math.min(100, ((status.pollIntervalMs - status.timeUntilNextCheck) / status.pollIntervalMs) * 100))
     : 0;
 
-  return (
-    <div className="min-h-screen p-4 md:p-8">
-      <div className="max-w-6xl mx-auto space-y-6">
-        {/* Header */}
-        <div>
-          <h1 className="text-3xl font-bold">findthisthread</h1>
-          <p className="text-muted-foreground">reddit screenshot bot dashboard</p>
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <RefreshCw className="h-4 w-4 animate-spin" />
+          <span className="text-sm">connecting...</span>
         </div>
+      </div>
+    );
+  }
 
-        {/* Timer Bar */}
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-muted-foreground flex items-center">
-                <Clock className="mr-2 h-4 w-4" />
-                checking for link requests in {formatTime(status?.timeUntilNextCheck || 0)}
-              </span>
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Sticky header */}
+      <header className="sticky top-0 z-40 bg-background/95 backdrop-blur-sm border-b border-border">
+        <div className="px-4 py-3 max-w-2xl mx-auto">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h1 className="text-lg font-semibold tracking-tight">findthisthread</h1>
+              <p className="text-xs text-muted-foreground">reddit link finder</p>
             </div>
-            <div className="flex items-center gap-3">
-              <div className="flex-1 bg-secondary rounded-full h-2 overflow-hidden">
+            <button
+              onClick={triggerRefresh}
+              disabled={refreshing || connectionStatus !== "connected"}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-secondary hover:bg-secondary/80 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <RefreshCw className={`h-3 w-3 ${refreshing ? "animate-spin" : ""}`} />
+              check now
+            </button>
+          </div>
+
+          {/* Progress bar */}
+          <div className="flex items-center gap-3">
+            <div className="flex-1">
+              <div className="h-1 bg-secondary rounded-full overflow-hidden">
                 <div
-                  className="bg-primary h-2 rounded-full transition-all duration-300 ease-linear"
+                  className="h-full bg-[#FF4500] rounded-full transition-all duration-300 ease-linear"
                   style={{ width: `${progressPercent}%` }}
                 />
               </div>
-              <Button size="sm" onClick={triggerRefresh} disabled={refreshing || connectionStatus !== "connected"}>
-                <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
-                check now
-              </Button>
             </div>
-          </CardContent>
-        </Card>
+            <span className="text-[10px] text-muted-foreground font-mono-data whitespace-nowrap flex items-center gap-1">
+              <Clock className="h-3 w-3" />
+              {formatTime(status?.timeUntilNextCheck || 0)}
+            </span>
+          </div>
+        </div>
+      </header>
 
-        {/* Link Requests */}
-        <Card>
-          <CardHeader>
-            <CardTitle>link requests</CardTitle>
-            <CardDescription>last 50 processed requests</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {mentions.length === 0 ? (
-                <p className="text-center text-muted-foreground py-8">no link requests yet</p>
-              ) : (
-                mentions.map((mention) => (
-                  <div
-                    key={mention.mention_id}
-                    className="flex items-start gap-4 p-4 rounded-lg border bg-card"
+      {/* Main content */}
+      <main className="px-4 py-4 max-w-2xl mx-auto">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            link requests
+          </h2>
+          <span className="text-[10px] text-muted-foreground font-mono-data">
+            {mentions.length} requests
+          </span>
+        </div>
+
+        {mentions.length === 0 ? (
+          <div className="text-center py-16 text-muted-foreground text-sm">
+            no link requests yet
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {mentions.map((mention) => (
+              <article
+                key={mention.mention_id}
+                className="flex gap-3 p-3 rounded-md border border-border bg-card hover:border-border/80 transition-colors"
+              >
+                {/* Thumbnail */}
+                {mention.image_url && (
+                  <button
+                    onClick={() => setModalImage(mention.image_url)}
+                    className="flex-shrink-0 group"
                   >
-                    {mention.image_url && (
-                      <button onClick={() => setModalImage(mention.image_url)} className="flex-shrink-0">
-                        <img
-                          src={mention.image_url}
-                          alt="Screenshot"
-                          className="w-20 h-20 object-cover rounded-md border hover:opacity-80 transition-opacity cursor-pointer"
-                        />
-                      </button>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        {mention.reddit_url ? (
-                          <Badge variant="success" className="flex items-center gap-1">
-                            <CheckCircle className="h-3 w-3" /> found
-                          </Badge>
-                        ) : (
-                          <Badge variant="destructive" className="flex items-center gap-1">
-                            <XCircle className="h-3 w-3" /> {mention.result.toLowerCase()}
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="text-sm space-y-0.5">
-                        {mention.parent_author && (
-                          <div><span className="text-muted-foreground">screenshot posted by:</span> <span className="font-medium">@{mention.parent_author}</span></div>
-                        )}
-                        <div><span className="text-muted-foreground">link requested by:</span> <span className="font-medium">@{mention.author_username}</span></div>
-                        {mention.mention_text && (() => {
-                          const tagText = mention.mention_text.replace(/@\w+/g, '').trim();
-                          return tagText ? (
-                            <div><span className="text-muted-foreground">tag:</span> <span className="italic">"{tagText}"</span></div>
-                          ) : null;
-                        })()}
-                      </div>
-                      <div className="text-sm text-muted-foreground truncate mt-1">
-                        {mention.extracted_subreddit && <span>r/{mention.extracted_subreddit} </span>}
-                        {mention.extracted_username && <span>u/{mention.extracted_username} </span>}
-                        {mention.extracted_title && (
-                          <span className="italic">"{mention.extracted_title.substring(0, 50)}..."</span>
-                        )}
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-1">{formatDate(mention.processed_at)}</div>
-                    </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      {mention.reddit_url ? (
-                        <a href={mention.reddit_url} target="_blank" rel="noopener noreferrer">
-                          <Button size="sm" className="bg-[#FF4500] hover:bg-[#FF5722] text-white">
-                            <ExternalLink className="mr-1 h-4 w-4" />
-                            go to reddit
-                          </Button>
-                        </a>
-                      ) : (
-                        <Button variant="outline" size="sm" onClick={() => reprocessMention(mention.mention_id)}>
-                          <RefreshCw className="h-4 w-4" />
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+                    <img
+                      src={mention.image_url}
+                      alt=""
+                      className="w-14 h-14 sm:w-16 sm:h-16 object-cover rounded border border-border group-hover:opacity-80 transition-opacity"
+                    />
+                  </button>
+                )}
 
-      {/* Image Modal */}
+                {/* Content */}
+                <div className="flex-1 min-w-0 flex flex-col justify-between">
+                  <div>
+                    {/* Status + metadata row */}
+                    <div className="flex items-center gap-2 mb-1">
+                      {mention.reddit_url ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-green-600 dark:text-green-500">
+                          <Check className="h-3 w-3" />
+                          found
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-red-500">
+                          <X className="h-3 w-3" />
+                          {mention.result.toLowerCase()}
+                        </span>
+                      )}
+                      <span className="text-[10px] text-muted-foreground">
+                        {formatDate(mention.processed_at)}
+                      </span>
+                    </div>
+
+                    {/* Users */}
+                    <div className="text-xs space-y-0.5">
+                      {mention.parent_author && (
+                        <div className="truncate">
+                          <span className="text-muted-foreground">posted by </span>
+                          <span className="font-medium">@{mention.parent_author}</span>
+                        </div>
+                      )}
+                      <div className="truncate">
+                        <span className="text-muted-foreground">requested by </span>
+                        <span className="font-medium">@{mention.author_username}</span>
+                      </div>
+                    </div>
+
+                    {/* Extracted info */}
+                    {(mention.extracted_subreddit || mention.extracted_username) && (
+                      <div className="text-[10px] text-muted-foreground mt-1 truncate font-mono-data">
+                        {mention.extracted_subreddit && <span>r/{mention.extracted_subreddit} </span>}
+                        {mention.extracted_username && <span>u/{mention.extracted_username}</span>}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Action */}
+                <div className="flex-shrink-0 flex items-center">
+                  {mention.reddit_url ? (
+                    <a
+                      href={mention.reddit_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-[#FF4500] hover:bg-[#E03D00] text-white transition-colors"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      <span className="hidden sm:inline">reddit</span>
+                    </a>
+                  ) : (
+                    <button
+                      onClick={() => reprocessMention(mention.mention_id)}
+                      className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-border hover:bg-secondary transition-colors"
+                      title="retry"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5 text-muted-foreground" />
+                    </button>
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </main>
+
+      {/* Image modal */}
       {modalImage && (
         <div
-          className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
           onClick={() => setModalImage(null)}
         >
-          <div className="relative max-w-4xl max-h-[90vh]">
+          <div className="relative max-w-3xl w-full">
             <img
               src={modalImage}
-              alt="Screenshot"
-              className="max-w-full max-h-[90vh] object-contain rounded-lg"
+              alt=""
+              className="w-full max-h-[85vh] object-contain rounded-md"
               onClick={(e) => e.stopPropagation()}
             />
             <button
               onClick={() => setModalImage(null)}
-              className="absolute -top-3 -right-3 bg-white text-black rounded-full w-8 h-8 flex items-center justify-center hover:bg-gray-200 font-bold"
+              className="absolute -top-2 -right-2 w-7 h-7 rounded-full bg-white text-black flex items-center justify-center text-sm font-medium hover:bg-gray-100 transition-colors"
             >
               ×
             </button>
