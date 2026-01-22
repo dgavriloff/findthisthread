@@ -213,7 +213,7 @@ export default function Dashboard() {
                       ) : mention.result === "processing" ? (
                         <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-500">
                           <RefreshCw className="h-3 w-3 animate-spin" />
-                          searching...
+                          found request by @{mention.author_username}, processing...
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-[10px] font-medium text-red-500">
