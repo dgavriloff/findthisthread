@@ -151,6 +151,24 @@ export class BotHandler {
             result: 'user_not_found',
           });
         }
+      } else if (result?.error === 'rate_limited') {
+        console.log('Reddit rate limited - could not complete search');
+        if (!this.testMode) {
+          this.db.saveMention({
+            mentionId: mention.id,
+            authorUsername: mention.author_username,
+            authorId: mention.author_id,
+            mentionText: mention.text,
+            parentTweetId,
+            parentAuthor,
+            parentText,
+            imageUrl,
+            extractedSubreddit,
+            extractedUsername,
+            extractedTitle,
+            result: 'rate_limited',
+          });
+        }
       } else if (result && !result.error) {
         console.log(`Found match: ${result.url} (confidence: ${result.matchConfidence})`);
         if (!this.testMode) {

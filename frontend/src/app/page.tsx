@@ -215,6 +215,11 @@ export default function Dashboard() {
                           <RefreshCw className="h-3 w-3 animate-spin" />
                           found request by @{mention.author_username}, processing...
                         </span>
+                      ) : mention.result === "rate_limited" ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-500">
+                          <RotateCcw className="h-3 w-3" />
+                          reddit says try later
+                        </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-[10px] font-medium text-red-500">
                           <X className="h-3 w-3" />

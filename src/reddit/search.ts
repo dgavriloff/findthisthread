@@ -165,10 +165,13 @@ export class RedditSearch {
 
     let bestResult: RedditSearchResult | null = null;
 
+    let wasRateLimited = false;
+
     for (const { name, fn } of strategies) {
       // Stop if we hit rate limit
       if (this.isRateLimited()) {
         console.log('Rate limited - stopping search early');
+        wasRateLimited = true;
         break;
       }
 
@@ -195,6 +198,19 @@ export class RedditSearch {
     if (bestResult && bestResult.matchConfidence >= 0.4) {
       console.log(`Returning best match with confidence: ${bestResult.matchConfidence.toFixed(3)}`);
       return bestResult;
+    }
+
+    // If we were rate limited and found nothing, indicate that
+    if (wasRateLimited) {
+      console.log('Search incomplete due to rate limiting');
+      return {
+        url: '',
+        title: '',
+        author: info.username || '',
+        subreddit: info.subreddit || '',
+        matchConfidence: 0,
+        error: 'rate_limited',
+      };
     }
 
     return null;
