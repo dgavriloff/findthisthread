@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, ExternalLink, CheckCircle, XCircle, Clock, Activity } from "lucide-react";
+import { RefreshCw, ExternalLink, CheckCircle, XCircle, Clock, Activity, Wifi, WifiOff } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
+// Convert http(s) to ws(s) for WebSocket URL
+const WS_URL = API_URL.replace(/^http/, "ws") + "/ws";
 
 interface BotStatus {
   lastCheckTime: number;
@@ -34,63 +36,117 @@ interface Mention {
   image_url: string | null;
 }
 
+type ConnectionStatus = "connecting" | "connected" | "disconnected";
+
 export default function Dashboard() {
   const [status, setStatus] = useState<BotStatus | null>(null);
   const [mentions, setMentions] = useState<Mention[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const fetchData = useCallback(async () => {
-    try {
-      const [statusRes, mentionsRes] = await Promise.all([
-        fetch(`${API_URL}/api/status`),
-        fetch(`${API_URL}/api/mentions?limit=50`),
-      ]);
+  const connect = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
-      if (!statusRes.ok || !mentionsRes.ok) {
-        throw new Error("Failed to fetch data");
-      }
+    setConnectionStatus("connecting");
+    const ws = new WebSocket(WS_URL);
 
-      const statusData = await statusRes.json();
-      const mentionsData = await mentionsRes.json();
-
-      setStatus(statusData);
-      setMentions(mentionsData.mentions);
+    ws.onopen = () => {
+      console.log("WebSocket connected");
+      setConnectionStatus("connected");
       setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to connect to API");
-    } finally {
-      setLoading(false);
-    }
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+
+        switch (message.type) {
+          case "init":
+            // Initial data on connect
+            setStatus(message.data.status);
+            setMentions(message.data.mentions);
+            setLoading(false);
+            break;
+          case "tick":
+            // Timer update every second
+            setStatus((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    currentTime: message.data.currentTime,
+                    timeUntilNextCheck: message.data.timeUntilNextCheck,
+                    lastCheckTime: message.data.lastCheckTime,
+                    nextCheckTime: message.data.nextCheckTime,
+                  }
+                : prev
+            );
+            break;
+          case "status":
+            // Full status update
+            setStatus(message.data);
+            break;
+          case "mentions":
+            // Mentions list update
+            setMentions(message.data);
+            break;
+          case "refresh_ack":
+            setRefreshing(false);
+            break;
+          case "reprocess_result":
+            alert(message.data.message);
+            break;
+        }
+      } catch (err) {
+        console.error("Failed to parse WebSocket message:", err);
+      }
+    };
+
+    ws.onerror = (err) => {
+      console.error("WebSocket error:", err);
+    };
+
+    ws.onclose = () => {
+      console.log("WebSocket disconnected");
+      setConnectionStatus("disconnected");
+      wsRef.current = null;
+
+      // Reconnect after 3 seconds
+      reconnectTimeoutRef.current = setTimeout(() => {
+        console.log("Attempting to reconnect...");
+        connect();
+      }, 3000);
+    };
+
+    wsRef.current = ws;
   }, []);
 
   useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 5000);
-    return () => clearInterval(interval);
-  }, [fetchData]);
+    connect();
 
-  const triggerRefresh = async () => {
-    setRefreshing(true);
-    try {
-      await fetch(`${API_URL}/api/refresh`, { method: "POST" });
-      await fetchData();
-    } finally {
-      setRefreshing(false);
+    return () => {
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
+  }, [connect]);
+
+  const triggerRefresh = () => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      setRefreshing(true);
+      wsRef.current.send(JSON.stringify({ type: "refresh" }));
     }
   };
 
-  const reprocessMention = async (mentionId: string) => {
-    try {
-      const res = await fetch(`${API_URL}/api/reprocess/${mentionId}`, { method: "POST" });
-      const data = await res.json();
-      if (data.success) {
-        await fetchData();
-      }
-      alert(data.message);
-    } catch (err) {
-      alert("Failed to reprocess");
+  const reprocessMention = (mentionId: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "reprocess", mentionId }));
     }
   };
 
@@ -112,7 +168,7 @@ export default function Dashboard() {
     );
   }
 
-  if (error) {
+  if (error && connectionStatus === "disconnected") {
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
         <Card className="w-full max-w-md">
@@ -121,7 +177,7 @@ export default function Dashboard() {
             <CardDescription>{error}</CardDescription>
           </CardHeader>
           <CardContent>
-            <Button onClick={fetchData} className="w-full">
+            <Button onClick={connect} className="w-full">
               <RefreshCw className="mr-2 h-4 w-4" /> Retry
             </Button>
           </CardContent>
@@ -143,10 +199,27 @@ export default function Dashboard() {
             <h1 className="text-3xl font-bold">FindThisThread</h1>
             <p className="text-muted-foreground">Reddit Screenshot Bot Dashboard</p>
           </div>
-          <Button onClick={triggerRefresh} disabled={refreshing}>
-            <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
-            Check Now
-          </Button>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 text-sm">
+              {connectionStatus === "connected" ? (
+                <Badge variant="outline" className="text-green-500 border-green-500">
+                  <Wifi className="mr-1 h-3 w-3" /> Live
+                </Badge>
+              ) : connectionStatus === "connecting" ? (
+                <Badge variant="outline" className="text-yellow-500 border-yellow-500">
+                  <RefreshCw className="mr-1 h-3 w-3 animate-spin" /> Connecting
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="text-red-500 border-red-500">
+                  <WifiOff className="mr-1 h-3 w-3" /> Offline
+                </Badge>
+              )}
+            </div>
+            <Button onClick={triggerRefresh} disabled={refreshing || connectionStatus !== "connected"}>
+              <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+              Check Now
+            </Button>
+          </div>
         </div>
 
         {/* Timer Bar */}
@@ -161,9 +234,9 @@ export default function Dashboard() {
                 {status?.isRunning ? "Running" : "Stopped"}
               </Badge>
             </div>
-            <div className="w-full bg-secondary rounded-full h-2">
+            <div className="w-full bg-secondary rounded-full h-2 overflow-hidden">
               <div
-                className="bg-primary h-2 rounded-full transition-all duration-1000"
+                className="bg-primary h-2 rounded-full transition-all duration-300 ease-linear"
                 style={{ width: `${progressPercent}%` }}
               />
             </div>

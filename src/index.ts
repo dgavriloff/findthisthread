@@ -4,18 +4,19 @@ import { RedditSearch } from './reddit/search';
 import { MentionsDB } from './db/mentions';
 import { BotHandler } from './bot/handler';
 import { createServer, BotState } from './web/server';
+import type { ServerWebSocket } from 'bun';
 
 // Load environment variables
 const TWITTER_API_KEY = process.env.TWITTER_API_KEY;
 const TWITTER_BOT_USERNAME = process.env.TWITTER_BOT_USERNAME || 'findthisthread';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-// Railway volumes mount at /data - use that if available, otherwise local ./data
 const DATABASE_PATH = process.env.DATABASE_PATH || (process.env.RAILWAY_ENVIRONMENT ? '/data/mentions.db' : './data/mentions.db');
-const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || '300000', 10); // 5 minutes default
+const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || '300000', 10);
 const PORT = parseInt(process.env.PORT || '3000', 10);
-
-// Check for test mode via CLI arg or env var
 const TEST_MODE = process.argv.includes('--test') || process.env.TEST_MODE === 'true';
+
+// WebSocket clients
+const wsClients = new Set<ServerWebSocket<unknown>>();
 
 // Manual refresh trigger
 let refreshRequested = false;
@@ -30,6 +31,18 @@ const botState: BotState = {
   pollIntervalMs: POLL_INTERVAL_MS,
   isRunning: true,
 };
+
+// Broadcast to all WebSocket clients
+function broadcast(type: string, data: any) {
+  const message = JSON.stringify({ type, data, timestamp: Date.now() });
+  for (const client of wsClients) {
+    try {
+      client.send(message);
+    } catch (e) {
+      wsClients.delete(client);
+    }
+  }
+}
 
 function validateEnv(): void {
   if (!TWITTER_API_KEY && !TEST_MODE) {
@@ -62,14 +75,25 @@ async function main(): Promise<void> {
   const db = new MentionsDB(DATABASE_PATH);
   const handler = new BotHandler(twitter, vision, reddit, db, TEST_MODE);
 
-  // Start API server
+  // Create Hono app for REST endpoints
   const app = createServer(db, () => botState, triggerRefresh, (mentionId) => handler.reprocessMention(mentionId));
 
   console.log(`Starting API server on port ${PORT}...`);
+
   const server = Bun.serve({
     port: PORT,
     hostname: '0.0.0.0',
-    async fetch(req) {
+
+    async fetch(req, server) {
+      const url = new URL(req.url);
+
+      // WebSocket upgrade
+      if (url.pathname === '/ws') {
+        const upgraded = server.upgrade(req);
+        if (upgraded) return undefined as any;
+        return new Response('WebSocket upgrade failed', { status: 400 });
+      }
+
       // Handle CORS preflight
       if (req.method === 'OPTIONS') {
         return new Response(null, {
@@ -84,7 +108,6 @@ async function main(): Promise<void> {
 
       try {
         const response = await app.fetch(req);
-        // Add CORS headers to all responses
         const headers = new Headers(response.headers);
         headers.set('Access-Control-Allow-Origin', '*');
         return new Response(response.body, {
@@ -96,24 +119,61 @@ async function main(): Promise<void> {
         console.error('Server error:', error);
         return new Response(JSON.stringify({ error: 'Internal server error' }), {
           status: 500,
-          headers: {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-          },
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
         });
       }
     },
+
+    websocket: {
+      open(ws) {
+        wsClients.add(ws);
+        console.log(`WebSocket client connected (${wsClients.size} total)`);
+        // Send initial state
+        const stats = db.getStats();
+        const mentions = db.getAllMentions(50);
+        ws.send(JSON.stringify({
+          type: 'init',
+          data: {
+            status: { ...botState, stats, currentTime: Date.now(), timeUntilNextCheck: Math.max(0, botState.nextCheckTime - Date.now()) },
+            mentions,
+          },
+          timestamp: Date.now(),
+        }));
+      },
+      message(ws, message) {
+        // Handle incoming messages (e.g., refresh request)
+        try {
+          const data = JSON.parse(message.toString());
+          if (data.type === 'refresh') {
+            triggerRefresh();
+            ws.send(JSON.stringify({ type: 'refresh_ack', timestamp: Date.now() }));
+          } else if (data.type === 'reprocess' && data.mentionId) {
+            handler.reprocessMention(data.mentionId).then(result => {
+              ws.send(JSON.stringify({ type: 'reprocess_result', data: result, timestamp: Date.now() }));
+              // Broadcast updated mentions
+              broadcast('mentions', db.getAllMentions(50));
+            });
+          }
+        } catch (e) {
+          // Ignore invalid messages
+        }
+      },
+      close(ws) {
+        wsClients.delete(ws);
+        console.log(`WebSocket client disconnected (${wsClients.size} total)`);
+      },
+    },
   });
+
   console.log(`API server running at http://0.0.0.0:${server.port}`);
+  console.log(`WebSocket available at ws://0.0.0.0:${server.port}/ws`);
 
   // Get last processed mention ID from database
   let lastMentionId: string | undefined = TEST_MODE ? undefined : db.getLastMentionId();
   console.log(`Starting from mention ID: ${lastMentionId || 'beginning'}`);
 
-  // Print initial stats
   const stats = db.getStats();
   console.log(`Database stats: ${stats.total} processed, ${stats.successful} successful, ${stats.failed} failed`);
-
   console.log('\nBot started. Polling for mentions...\n');
 
   // Check for mentions
@@ -122,18 +182,22 @@ async function main(): Promise<void> {
     botState.lastCheckTime = Date.now();
     botState.nextCheckTime = Date.now() + POLL_INTERVAL_MS;
 
+    // Broadcast status update
+    broadcast('status', { ...botState, stats: db.getStats(), currentTime: Date.now(), timeUntilNextCheck: POLL_INTERVAL_MS });
+
     try {
       const mentions = await twitter.getMentions(lastMentionId);
 
       if (mentions.length > 0) {
         console.log(`Found ${mentions.length} new mention(s)`);
 
-        // Process mentions in reverse order (oldest first)
         for (const mention of mentions.reverse()) {
           await handler.handleMention(mention);
+          // Broadcast updated mentions after each one is processed
+          broadcast('mentions', db.getAllMentions(50));
+          broadcast('status', { ...botState, stats: db.getStats(), currentTime: Date.now(), timeUntilNextCheck: Math.max(0, botState.nextCheckTime - Date.now()) });
         }
 
-        // Update last mention ID to the most recent
         lastMentionId = mentions[0].id;
       } else {
         console.log('No new mentions');
@@ -146,15 +210,24 @@ async function main(): Promise<void> {
   // Initial check
   await checkMentions();
 
-  // In test mode, only run once
   if (TEST_MODE) {
     console.log('\n[TEST MODE] Single run complete. Server still running for dashboard...');
     botState.isRunning = false;
-    // Keep server running in test mode for dashboard inspection
     await new Promise(() => {});
   }
 
-  // Main polling loop - check every second for manual refresh, run check when timer expires
+  // Broadcast timer updates every second
+  setInterval(() => {
+    const now = Date.now();
+    broadcast('tick', {
+      currentTime: now,
+      timeUntilNextCheck: Math.max(0, botState.nextCheckTime - now),
+      lastCheckTime: botState.lastCheckTime,
+      nextCheckTime: botState.nextCheckTime,
+    });
+  }, 1000);
+
+  // Main polling loop
   while (true) {
     await sleep(1000);
 
@@ -171,7 +244,6 @@ async function main(): Promise<void> {
   }
 }
 
-// Handle graceful shutdown
 process.on('SIGINT', () => {
   console.log('\nShutting down...');
   process.exit(0);
