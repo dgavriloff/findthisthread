@@ -238,16 +238,18 @@ export default function Dashboard() {
 
                     {/* Users */}
                     <div className="text-xs space-y-0.5">
-                      {mention.parent_author && (
+                      {mention.parent_author && mention.parent_author !== "unknown" && (
                         <div className="truncate">
                           <span className="text-muted-foreground">posted by </span>
                           <span className="font-medium">@{mention.parent_author}</span>
                         </div>
                       )}
-                      <div className="truncate">
-                        <span className="text-muted-foreground">requested by </span>
-                        <span className="font-medium">@{mention.author_username}</span>
-                      </div>
+                      {mention.author_username && mention.author_username !== "unknown" && (
+                        <div className="truncate">
+                          <span className="text-muted-foreground">requested by </span>
+                          <span className="font-medium">@{mention.author_username}</span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Extracted info */}
@@ -270,7 +272,7 @@ export default function Dashboard() {
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-[#FF4500] hover:bg-[#E03D00] text-white transition-colors"
                     >
                       <ExternalLink className="h-3 w-3" />
-                      <span className="hidden sm:inline">reddit</span>
+                      reddit
                     </a>
                   ) : (
                     <button

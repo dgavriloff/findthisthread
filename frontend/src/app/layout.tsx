@@ -5,8 +5,8 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "FindThisThread Dashboard",
-  description: "Monitor the FindThisThread Reddit screenshot bot",
+  title: "findthisthread",
+  description: "reddit screenshot link finder",
 };
 
 export default function RootLayout({
