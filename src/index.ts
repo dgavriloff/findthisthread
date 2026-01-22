@@ -146,7 +146,7 @@ async function main(): Promise<void> {
           const data = JSON.parse(message.toString());
           if (data.type === 'refresh') {
             triggerRefresh();
-            ws.send(JSON.stringify({ type: 'refresh_ack', timestamp: Date.now() }));
+            // refresh_complete will be broadcast after checkMentions finishes
           } else if (data.type === 'reprocess' && data.mentionId) {
             handler.reprocessMention(data.mentionId).then(result => {
               ws.send(JSON.stringify({ type: 'reprocess_result', data: result, timestamp: Date.now() }));
@@ -176,8 +176,8 @@ async function main(): Promise<void> {
   console.log(`Database stats: ${stats.total} processed, ${stats.successful} successful, ${stats.failed} failed`);
   console.log('\nBot started. Polling for mentions...\n');
 
-  // Check for mentions
-  async function checkMentions() {
+  // Check for mentions - returns count of new mentions found
+  async function checkMentions(): Promise<number> {
     console.log('Checking for new mentions...');
     botState.lastCheckTime = Date.now();
     botState.nextCheckTime = Date.now() + POLL_INTERVAL_MS;
@@ -202,11 +202,14 @@ async function main(): Promise<void> {
         }
 
         lastMentionId = mentions[0].id;
+        return mentions.length;
       } else {
         console.log('No new mentions');
+        return 0;
       }
     } catch (error) {
       console.error('Error during polling:', error);
+      return 0;
     }
   }
 
@@ -238,7 +241,9 @@ async function main(): Promise<void> {
     if (refreshRequested) {
       console.log('Manual refresh triggered');
       refreshRequested = false;
-      await checkMentions();
+      const foundCount = await checkMentions();
+      // Broadcast completion with count so frontend can show feedback
+      broadcast('refresh_complete', { found: foundCount });
     }
   }
 }

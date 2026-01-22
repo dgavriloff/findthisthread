@@ -40,6 +40,7 @@ export default function Dashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
   const [modalImage, setModalImage] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -72,8 +73,12 @@ export default function Dashboard() {
           case "mentions":
             setMentions(message.data);
             break;
-          case "refresh_ack":
+          case "refresh_complete":
             setRefreshing(false);
+            if (message.data.found === 0) {
+              setToast("no new requests found");
+              setTimeout(() => setToast(null), 3000);
+            }
             break;
           case "reprocess_result":
             alert(message.data.message);
@@ -307,6 +312,13 @@ export default function Dashboard() {
               ×
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Toast notification */}
+      {toast && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 bg-card border border-border rounded-md shadow-lg text-xs text-muted-foreground animate-in fade-in slide-in-from-bottom-2 duration-200">
+          {toast}
         </div>
       )}
     </div>
