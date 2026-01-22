@@ -66,14 +66,23 @@ async function main(): Promise<void> {
   const app = createServer(db, () => botState, triggerRefresh, (mentionId) => handler.reprocessMention(mentionId));
   const server = Bun.serve({
     port: PORT,
-    hostname: '0.0.0.0', // Bind to all interfaces (required for Railway/Docker)
-    fetch: app.fetch.bind(app),
-    error(error) {
-      console.error('Server error:', error);
-      return new Response('Internal Server Error', { status: 500 });
+    hostname: '0.0.0.0',
+    async fetch(req) {
+      try {
+        const url = new URL(req.url);
+        // Simple health check that bypasses Hono
+        if (url.pathname === '/health') {
+          return new Response('OK', { status: 200 });
+        }
+        // Pass to Hono for everything else
+        return await app.fetch(req);
+      } catch (error) {
+        console.error('Request error:', error);
+        return new Response('Internal Server Error', { status: 500 });
+      }
     },
   });
-  console.log(`\nDashboard running at http://0.0.0.0:${server.port}`);
+  console.log(`Server listening on 0.0.0.0:${server.port}`);
 
   // Get last processed mention ID from database
   let lastMentionId: string | undefined = TEST_MODE ? undefined : db.getLastMentionId();
