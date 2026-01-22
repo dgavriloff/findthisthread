@@ -42,29 +42,65 @@ export class TwitterClient {
       return MOCK_MENTIONS;
     }
 
-    // Use the dedicated mentions endpoint
-    const response = await this.request<{ status: string; tweets: any[] }>(
-      `/twitter/user/mentions?userName=${this.botUsername}`
-    );
+    // Collect mentions from multiple sources to catch filtered replies
+    const mentionsMap = new Map<string, Mention>();
 
-    if (!response.tweets) {
-      return [];
+    // Method 1: Dedicated mentions endpoint (may filter "low quality" replies)
+    try {
+      const mentionsResponse = await this.request<{ status: string; tweets: any[] }>(
+        `/twitter/user/mentions?userName=${this.botUsername}`
+      );
+      if (mentionsResponse.tweets) {
+        for (const tweet of mentionsResponse.tweets) {
+          mentionsMap.set(tweet.id, {
+            id: tweet.id,
+            text: tweet.text,
+            author_id: tweet.author?.id || '',
+            author_username: tweet.author?.userName || '',
+            in_reply_to_status_id: tweet.inReplyToId || tweet.in_reply_to_status_id,
+            created_at: tweet.createdAt || tweet.created_at,
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching mentions endpoint:', error);
     }
 
-    let mentions = response.tweets.map((tweet: any) => ({
-      id: tweet.id,
-      text: tweet.text,
-      author_id: tweet.author?.id || '',
-      author_username: tweet.author?.userName || '',
-      in_reply_to_status_id: tweet.inReplyToId || tweet.in_reply_to_status_id,
-      created_at: tweet.createdAt || tweet.created_at,
-    }));
+    // Method 2: Search for @username (catches filtered mentions)
+    try {
+      const searchResponse = await this.request<{ status: string; tweets: any[] }>(
+        `/twitter/tweet/advanced_search?query=${encodeURIComponent(`@${this.botUsername}`)}&queryType=Latest`
+      );
+      if (searchResponse.tweets) {
+        for (const tweet of searchResponse.tweets) {
+          // Don't overwrite if we already have it from mentions endpoint
+          if (!mentionsMap.has(tweet.id)) {
+            mentionsMap.set(tweet.id, {
+              id: tweet.id,
+              text: tweet.text,
+              author_id: tweet.author?.id || '',
+              author_username: tweet.author?.userName || '',
+              in_reply_to_status_id: tweet.inReplyToId || tweet.in_reply_to_status_id,
+              created_at: tweet.createdAt || tweet.created_at,
+            });
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching search results:', error);
+    }
+
+    let mentions = Array.from(mentionsMap.values());
+
+    // Sort by ID (newest first)
+    mentions.sort((a, b) => b.id.localeCompare(a.id));
 
     // Filter to only new mentions if sinceId provided
     if (sinceId) {
       mentions = mentions.filter(m => m.id > sinceId);
     }
 
+    console.log(`Found ${mentions.length} mentions (${mentionsMap.size} total from all sources)`);
     return mentions;
   }
 
