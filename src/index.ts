@@ -69,7 +69,40 @@ async function main(): Promise<void> {
   const server = Bun.serve({
     port: PORT,
     hostname: '0.0.0.0',
-    fetch: app.fetch,
+    async fetch(req) {
+      // Handle CORS preflight
+      if (req.method === 'OPTIONS') {
+        return new Response(null, {
+          status: 204,
+          headers: {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type',
+          },
+        });
+      }
+
+      try {
+        const response = await app.fetch(req);
+        // Add CORS headers to all responses
+        const headers = new Headers(response.headers);
+        headers.set('Access-Control-Allow-Origin', '*');
+        return new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers,
+        });
+      } catch (error) {
+        console.error('Server error:', error);
+        return new Response(JSON.stringify({ error: 'Internal server error' }), {
+          status: 500,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          },
+        });
+      }
+    },
   });
   console.log(`API server running at http://0.0.0.0:${server.port}`);
 

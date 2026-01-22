@@ -1,5 +1,4 @@
 import { Hono } from 'hono';
-import { cors } from 'hono/cors';
 import { MentionsDB, MentionRecord } from '../db/mentions';
 
 export interface BotState {
@@ -8,9 +7,6 @@ export interface BotState {
   pollIntervalMs: number;
   isRunning: boolean;
 }
-
-// Frontend URL for CORS (set via env or default to allow all for easier setup)
-const FRONTEND_URL = process.env.FRONTEND_URL;
 
 export function createServer(
   db: MentionsDB,
@@ -23,18 +19,6 @@ export function createServer(
   // Health check endpoint (for Railway)
   app.get('/health', (c) => c.text('OK'));
   app.get('/', (c) => c.json({ status: 'ok', service: 'findthisthread-api' }));
-
-  // Enable CORS for all routes (frontend is on different domain)
-  // Allow all origins if FRONTEND_URL not set (for easier initial setup)
-  const allowedOrigins = FRONTEND_URL
-    ? [FRONTEND_URL, 'http://localhost:3000', 'http://localhost:3001']
-    : '*';
-
-  app.use('*', cors({
-    origin: allowedOrigins as any,
-    allowMethods: ['GET', 'POST', 'OPTIONS'],
-    allowHeaders: ['Content-Type'],
-  }));
 
   // API: Get bot status and timer info
   app.get('/api/status', (c) => {
