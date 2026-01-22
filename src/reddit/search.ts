@@ -3,8 +3,10 @@ import { RedditPostInfo } from '../vision/types';
 import { RedditSearchResult, RedditSearchResponse, RedditPost, RedditUserCommentsResponse, RedditComment } from './types';
 
 const REDDIT_BASE = 'https://www.reddit.com';
+const REDDIT_OAUTH_BASE = 'https://oauth.reddit.com';
 const USER_AGENT = 'FindThisThread/1.0 (bot; contact: findthisthread@example.com)';
-const BASE_DELAY_MS = 6000; // 6 seconds between requests (Reddit allows ~10 req/min unauthenticated)
+const BASE_DELAY_MS = 1000; // 1 second between requests (OAuth allows 60 req/min)
+const UNAUTH_DELAY_MS = 6000; // 6 seconds for unauthenticated
 
 // Sanitize Reddit username/subreddit to prevent URL injection
 function sanitizeRedditName(name: string): string {
@@ -18,8 +20,62 @@ function sleep(ms: number): Promise<void> {
 
 export class RedditSearch {
   private lastRequestTime = 0;
-  private currentDelay = BASE_DELAY_MS;
-  private rateLimitedUntil = 0; // Timestamp when rate limit expires
+  private currentDelay: number;
+  private rateLimitedUntil = 0;
+
+  // OAuth credentials
+  private clientId: string | null;
+  private clientSecret: string | null;
+  private accessToken: string | null = null;
+  private tokenExpiresAt = 0;
+
+  constructor() {
+    this.clientId = process.env.REDDIT_CLIENT_ID || null;
+    this.clientSecret = process.env.REDDIT_CLIENT_SECRET || null;
+    this.currentDelay = this.clientId ? BASE_DELAY_MS : UNAUTH_DELAY_MS;
+
+    if (this.clientId && this.clientSecret) {
+      console.log('Reddit OAuth credentials configured - using authenticated API (60 req/min)');
+    } else {
+      console.log('No Reddit OAuth credentials - using unauthenticated API (10 req/min)');
+    }
+  }
+
+  private async getAccessToken(): Promise<string | null> {
+    if (!this.clientId || !this.clientSecret) return null;
+
+    // Return cached token if still valid (with 60s buffer)
+    if (this.accessToken && Date.now() < this.tokenExpiresAt - 60000) {
+      return this.accessToken;
+    }
+
+    try {
+      const auth = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64');
+      const response = await fetch('https://www.reddit.com/api/v1/access_token', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Basic ${auth}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': USER_AGENT,
+        },
+        body: 'grant_type=client_credentials',
+      });
+
+      if (!response.ok) {
+        console.error(`Reddit OAuth error (${response.status}): ${await response.text()}`);
+        return null;
+      }
+
+      const data = await response.json();
+      this.accessToken = data.access_token;
+      this.tokenExpiresAt = Date.now() + (data.expires_in * 1000);
+      console.log('Reddit OAuth token obtained, expires in', data.expires_in, 'seconds');
+      return this.accessToken;
+    } catch (error) {
+      console.error('Reddit OAuth error:', error);
+      return null;
+    }
+  }
 
   private async fetchReddit<T>(url: string, silent = false): Promise<T | null> {
     // If we're in rate limit cooldown, skip entirely
@@ -38,30 +94,37 @@ export class RedditSearch {
     this.lastRequestTime = Date.now();
 
     try {
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': USER_AGENT,
-        },
-      });
+      // Try OAuth first
+      const token = await this.getAccessToken();
+      const headers: Record<string, string> = { 'User-Agent': USER_AGENT };
+      let requestUrl = url;
+
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+        // Use OAuth endpoint instead of www
+        requestUrl = url.replace(REDDIT_BASE, REDDIT_OAUTH_BASE);
+      }
+
+      const response = await fetch(requestUrl, { headers });
 
       // Handle rate limiting with exponential backoff
       if (response.status === 429) {
-        // Set cooldown period - start with 60 seconds, double each time
+        const baseDelay = token ? BASE_DELAY_MS : UNAUTH_DELAY_MS;
         this.currentDelay = Math.min(this.currentDelay * 2, 60000);
-        this.rateLimitedUntil = Date.now() + 60000; // 60 second cooldown
+        this.rateLimitedUntil = Date.now() + 60000;
         console.log(`Rate limited by Reddit. Cooling down for 60s. Next delay: ${this.currentDelay/1000}s`);
         return null;
       }
 
       // Success - gradually reduce delay back to base
-      if (this.currentDelay > BASE_DELAY_MS) {
-        this.currentDelay = Math.max(BASE_DELAY_MS, this.currentDelay * 0.8);
+      const baseDelay = this.accessToken ? BASE_DELAY_MS : UNAUTH_DELAY_MS;
+      if (this.currentDelay > baseDelay) {
+        this.currentDelay = Math.max(baseDelay, this.currentDelay * 0.8);
       }
 
       if (!response.ok) {
-        // 404s are expected when subreddits don't exist - only log other errors
         if (response.status !== 404 && !silent) {
-          console.error(`Reddit API error (${response.status}): ${url}`);
+          console.error(`Reddit API error (${response.status}): ${requestUrl}`);
         }
         return null;
       }
@@ -79,12 +142,13 @@ export class RedditSearch {
   }
 
   async findRedditPost(info: RedditPostInfo): Promise<RedditSearchResult | null> {
-    // Reduced set of strategies - prioritize most effective ones
-    // Each strategy makes 1-2 API calls, so we need to be conservative
+    // Search strategies ordered by effectiveness
+    // With OAuth we can use more strategies (60 req/min vs 10)
     const strategies = [
       { name: 'titleInSubreddit', fn: () => this.searchByTitleInSubreddit(info) },
       { name: 'authorInSubreddit', fn: () => this.searchByAuthorInSubreddit(info) },
       { name: 'exactTitle', fn: () => this.searchExactTitle(info) },
+      { name: 'globalWithAuthor', fn: () => this.searchGlobal(info) },
       { name: 'userComments', fn: () => this.searchUserComments(info) },
     ];
 
@@ -315,10 +379,10 @@ export class RedditSearch {
 
     console.log(`Searching user comments for u/${info.username}...`);
 
-    // Fetch limited pages to avoid rate limiting (3 pages max = 300 comments)
+    // Fetch up to 5 pages (500 comments) - OAuth allows more requests
     const allComments: Array<{ kind: string; data: RedditComment }> = [];
     let after: string | null = null;
-    const maxPages = 3;
+    const maxPages = 5;
 
     for (let page = 0; page < maxPages; page++) {
       // Check rate limit before each page
