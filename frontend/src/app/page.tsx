@@ -34,6 +34,8 @@ interface Mention {
   extracted_username: string | null;
   extracted_title: string | null;
   image_url: string | null;
+  parent_author: string | null;
+  mention_text: string | null;
 }
 
 type ConnectionStatus = "connecting" | "connected" | "disconnected";
@@ -296,7 +298,6 @@ export default function Dashboard() {
                     )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="font-medium">@{mention.author_username}</span>
                         {mention.reddit_url ? (
                           <Badge variant="success" className="flex items-center gap-1">
                             <CheckCircle className="h-3 w-3" /> Found
@@ -307,7 +308,19 @@ export default function Dashboard() {
                           </Badge>
                         )}
                       </div>
-                      <div className="text-sm text-muted-foreground truncate">
+                      <div className="text-sm space-y-0.5">
+                        {mention.parent_author && (
+                          <div><span className="text-muted-foreground">Screenshot posted by:</span> <span className="font-medium">@{mention.parent_author}</span></div>
+                        )}
+                        <div><span className="text-muted-foreground">Link requested by:</span> <span className="font-medium">@{mention.author_username}</span></div>
+                        {mention.mention_text && (() => {
+                          const tagText = mention.mention_text.replace(/@\w+/g, '').trim();
+                          return tagText ? (
+                            <div><span className="text-muted-foreground">Tag:</span> <span className="italic">"{tagText}"</span></div>
+                          ) : null;
+                        })()}
+                      </div>
+                      <div className="text-sm text-muted-foreground truncate mt-1">
                         {mention.extracted_subreddit && <span>r/{mention.extracted_subreddit} </span>}
                         {mention.extracted_username && <span>u/{mention.extracted_username} </span>}
                         {mention.extracted_title && (
