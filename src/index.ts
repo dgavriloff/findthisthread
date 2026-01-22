@@ -67,9 +67,13 @@ async function main(): Promise<void> {
   const server = Bun.serve({
     port: PORT,
     hostname: '0.0.0.0', // Bind to all interfaces (required for Railway/Docker)
-    fetch: (req) => app.fetch(req),
+    fetch: app.fetch.bind(app),
+    error(error) {
+      console.error('Server error:', error);
+      return new Response('Internal Server Error', { status: 500 });
+    },
   });
-  console.log(`\nDashboard running at http://localhost:${server.port}`);
+  console.log(`\nDashboard running at http://0.0.0.0:${server.port}`);
 
   // Get last processed mention ID from database
   let lastMentionId: string | undefined = TEST_MODE ? undefined : db.getLastMentionId();
