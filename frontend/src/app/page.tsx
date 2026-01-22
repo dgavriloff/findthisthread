@@ -41,6 +41,7 @@ export default function Dashboard() {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
   const [modalImage, setModalImage] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [reprocessingId, setReprocessingId] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -81,7 +82,11 @@ export default function Dashboard() {
             }
             break;
           case "reprocess_result":
-            alert(message.data.message);
+            setReprocessingId(null);
+            if (!message.data.success) {
+              setToast(message.data.message || "still not found");
+              setTimeout(() => setToast(null), 3000);
+            }
             break;
         }
       } catch (err) {
@@ -115,6 +120,7 @@ export default function Dashboard() {
 
   const reprocessMention = (mentionId: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
+      setReprocessingId(mentionId);
       wsRef.current.send(JSON.stringify({ type: "reprocess", mentionId }));
     }
   };
@@ -272,14 +278,15 @@ export default function Dashboard() {
                       <ExternalLink className="h-3 w-3" />
                       reddit
                     </a>
-                  ) : mention.result === "processing" ? (
+                  ) : mention.result === "processing" || reprocessingId === mention.mention_id ? (
                     <div className="w-8 h-8 flex items-center justify-center">
                       <RefreshCw className="h-3.5 w-3.5 text-amber-500 animate-spin" />
                     </div>
                   ) : (
                     <button
                       onClick={() => reprocessMention(mention.mention_id)}
-                      className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-border hover:bg-secondary transition-colors"
+                      disabled={reprocessingId !== null}
+                      className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-border hover:bg-secondary disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                       title="retry"
                     >
                       <RotateCcw className="h-3.5 w-3.5 text-muted-foreground" />
