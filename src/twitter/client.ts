@@ -7,7 +7,6 @@ export class TwitterClient {
   private apiKey: string;
   private botUsername: string;
   private mockMode: boolean;
-  private mockProcessed: Set<string> = new Set();
 
   constructor(apiKey: string, botUsername: string, mockMode = false) {
     this.apiKey = apiKey;
@@ -36,30 +35,23 @@ export class TwitterClient {
 
   async getMentions(sinceId?: string): Promise<Mention[]> {
     if (this.mockMode) {
-      // Return mock mentions that haven't been "processed" yet
-      const unprocessed = MOCK_MENTIONS.filter(m => !this.mockProcessed.has(m.id));
+      // Return mock mentions
       if (sinceId) {
-        return unprocessed.filter(m => m.id > sinceId);
+        return MOCK_MENTIONS.filter(m => m.id > sinceId);
       }
-      return unprocessed;
+      return MOCK_MENTIONS;
     }
 
-    const params = new URLSearchParams({
-      query: `@${this.botUsername}`,
-    });
-    if (sinceId) {
-      params.append('sinceId', sinceId);
-    }
-
+    // Use the dedicated mentions endpoint
     const response = await this.request<{ status: string; tweets: any[] }>(
-      `/twitter/tweet/advanced_search?${params.toString()}`
+      `/twitter/user/mentions?userName=${this.botUsername}`
     );
 
     if (!response.tweets) {
       return [];
     }
 
-    return response.tweets.map((tweet: any) => ({
+    let mentions = response.tweets.map((tweet: any) => ({
       id: tweet.id,
       text: tweet.text,
       author_id: tweet.author?.id || '',
@@ -67,6 +59,13 @@ export class TwitterClient {
       in_reply_to_status_id: tweet.inReplyToId || tweet.in_reply_to_status_id,
       created_at: tweet.createdAt || tweet.created_at,
     }));
+
+    // Filter to only new mentions if sinceId provided
+    if (sinceId) {
+      mentions = mentions.filter(m => m.id > sinceId);
+    }
+
+    return mentions;
   }
 
   async getTweet(tweetId: string): Promise<Tweet | null> {
@@ -75,15 +74,15 @@ export class TwitterClient {
     }
 
     try {
-      const response = await this.request<{ status: string; tweet: any }>(
-        `/twitter/tweet/${tweetId}`
+      const response = await this.request<{ status: string; tweets: any[] }>(
+        `/twitter/tweets?tweet_ids=${tweetId}`
       );
 
-      if (!response.tweet) {
+      if (!response.tweets || response.tweets.length === 0) {
         return null;
       }
 
-      const tweet = response.tweet;
+      const tweet = response.tweets[0];
       const media: Media[] = [];
 
       // Extract media from extended entities or media field
@@ -128,30 +127,50 @@ export class TwitterClient {
     return this.getTweet(tweet.in_reply_to_status_id);
   }
 
-  async postReply(inReplyToId: string, text: string): Promise<void> {
-    if (this.mockMode) {
-      console.log(`\n[MOCK REPLY to ${inReplyToId}]:\n${text}\n`);
-      this.mockProcessed.add(inReplyToId);
-      return;
-    }
-
-    await this.request('/twitter/tweet', {
-      method: 'POST',
-      body: JSON.stringify({
-        text,
-        reply: {
-          in_reply_to_tweet_id: inReplyToId,
-        },
-      }),
-    });
-  }
-
   async downloadImage(mediaUrl: string): Promise<Buffer> {
-    const response = await fetch(mediaUrl);
-    if (!response.ok) {
-      throw new Error(`Failed to download image: ${response.status}`);
+    // Validate URL to prevent SSRF attacks
+    try {
+      const url = new URL(mediaUrl);
+      const allowedHosts = ['pbs.twimg.com', 'video.twimg.com', 'abs.twimg.com', 'ton.twimg.com'];
+      if (!allowedHosts.some(host => url.hostname === host || url.hostname.endsWith('.' + host))) {
+        throw new Error('Invalid media URL: must be from Twitter CDN');
+      }
+      if (url.protocol !== 'https:') {
+        throw new Error('Invalid media URL: must use HTTPS');
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message.startsWith('Invalid media URL')) throw e;
+      throw new Error('Invalid media URL format');
     }
-    const arrayBuffer = await response.arrayBuffer();
-    return Buffer.from(arrayBuffer);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000); // 30s timeout
+
+    try {
+      const response = await fetch(mediaUrl, { signal: controller.signal });
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        throw new Error(`Failed to download image: ${response.status}`);
+      }
+
+      // Check content length to prevent downloading huge files
+      const contentLength = response.headers.get('content-length');
+      const maxSize = 10 * 1024 * 1024; // 10MB
+      if (contentLength && parseInt(contentLength, 10) > maxSize) {
+        throw new Error('Image too large');
+      }
+
+      const arrayBuffer = await response.arrayBuffer();
+
+      // Double-check actual size
+      if (arrayBuffer.byteLength > maxSize) {
+        throw new Error('Image too large');
+      }
+
+      return Buffer.from(arrayBuffer);
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 }

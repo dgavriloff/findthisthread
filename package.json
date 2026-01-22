@@ -1,7 +1,7 @@
 {
-  "name": "reddit-link-bot",
+  "name": "findthisthread",
   "version": "1.0.0",
-  "description": "Twitter bot that finds Reddit post links from screenshots",
+  "description": "Bot that finds Reddit post links from screenshots with web dashboard",
   "type": "module",
   "scripts": {
     "start": "bun run src/index.ts",
@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
+    "hono": "^4.11.4",
     "string-similarity": "^4.0.4"
   },
   "devDependencies": {

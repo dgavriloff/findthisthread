@@ -86,7 +86,9 @@ The bot replies to the mention with either:
 
 ```
 src/
-├── index.ts              # Entry point, polling loop
+├── index.ts              # Entry point, polling loop + web server
+├── web/
+│   └── server.ts         # Hono web server + API routes
 ├── twitter/
 │   ├── client.ts         # Twitter API wrapper (twitterapi.io)
 │   ├── mock.ts           # Mock data for testing
@@ -101,7 +103,30 @@ src/
 │   └── handler.ts        # Main orchestration logic
 └── db/
     └── mentions.ts       # SQLite for tracking processed mentions
+
+public/
+└── index.html            # Dashboard frontend
 ```
+
+## Web Dashboard
+
+The bot includes a web dashboard that displays:
+
+- **Timer bar** showing countdown to the next Twitter check
+- **Stats** (total mentions, successful finds, failures)
+- **Recent finds** with direct Reddit links
+- **All mentions** with extracted info (subreddit, username, title)
+
+The dashboard auto-refreshes and is served at `http://localhost:3000` (or the `PORT` env var).
+
+### API Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/status` | Bot status, timer info, stats |
+| `GET /api/mentions` | All processed mentions |
+| `GET /api/successes` | Recent successful finds |
+| `GET /api/mentions/:id` | Single mention details |
 
 ## Running the Bot
 
@@ -111,7 +136,15 @@ src/
 bun start
 ```
 
-Polls Twitter every 30 seconds for new mentions.
+Starts the bot and web dashboard. Polls Twitter every 30 seconds for new mentions.
+
+### Development Mode
+
+```bash
+bun run dev
+```
+
+Runs with file watching for hot reload.
 
 ### Test Mode
 
@@ -125,8 +158,7 @@ TEST_MODE=true bun start
 
 Test mode:
 - Uses mock Twitter data (no API calls)
-- Skips database (runs fresh each time)
-- Runs once and exits
+- Runs one check cycle then keeps server running for dashboard
 - Still uses real Gemini + Reddit APIs
 
 ## Environment Variables
@@ -140,9 +172,50 @@ GEMINI_API_KEY=xxx         # From Google AI Studio
 TWITTER_BOT_USERNAME=findthisthread
 DATABASE_PATH=./data/mentions.db
 POLL_INTERVAL_MS=30000
+PORT=3000                  # Web dashboard port
 TEST_IMAGE_URL=xxx         # For testing
 TEST_MODE=true             # Enable test mode
 ```
+
+## Deployment (Railway)
+
+### 1. Create Railway Project
+
+```bash
+# Install Railway CLI
+npm i -g @railway/cli
+
+# Login and init
+railway login
+railway init
+```
+
+### 2. Add Volume for Persistent Storage
+
+1. Go to your service in Railway dashboard
+2. Settings → Volumes
+3. Add volume with mount path: `/data`
+
+The app auto-detects Railway and uses `/data/mentions.db` for the database.
+
+### 3. Set Environment Variables
+
+In Railway dashboard → Variables:
+
+```
+TWITTER_API_KEY=xxx
+GEMINI_API_KEY=xxx
+```
+
+Railway automatically sets `PORT` and `RAILWAY_ENVIRONMENT`.
+
+### 4. Deploy
+
+```bash
+railway up
+```
+
+Or connect your GitHub repo for automatic deploys.
 
 ## Limitations
 
@@ -157,6 +230,7 @@ TEST_MODE=true             # Enable test mode
 
 - **Runtime**: Bun
 - **Language**: TypeScript
+- **Web Framework**: Hono
 - **Vision API**: Google Gemini (gemini-2.0-flash)
 - **Twitter API**: twitterapi.io
 - **Database**: SQLite (via bun:sqlite)

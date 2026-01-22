@@ -2,6 +2,23 @@ import { Database } from 'bun:sqlite';
 import { mkdirSync, existsSync } from 'fs';
 import { dirname } from 'path';
 
+export interface MentionRecord {
+  mention_id: string;
+  author_username: string;
+  author_id: string;
+  mention_text: string;
+  parent_tweet_id: string | null;
+  parent_author: string | null;
+  parent_text: string | null;
+  image_url: string | null;
+  extracted_subreddit: string | null;
+  extracted_username: string | null;
+  extracted_title: string | null;
+  processed_at: string;
+  result: string;
+  reddit_url: string | null;
+}
+
 export class MentionsDB {
   private db: Database;
 
@@ -17,38 +34,128 @@ export class MentionsDB {
   }
 
   private init(): void {
+    // New expanded schema for dashboard
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS processed_mentions (
+      CREATE TABLE IF NOT EXISTS mentions (
         mention_id TEXT PRIMARY KEY,
+        author_username TEXT NOT NULL,
+        author_id TEXT NOT NULL,
+        mention_text TEXT,
+        parent_tweet_id TEXT,
+        parent_author TEXT,
+        parent_text TEXT,
+        image_url TEXT,
+        extracted_subreddit TEXT,
+        extracted_username TEXT,
+        extracted_title TEXT,
         processed_at TEXT NOT NULL,
-        result TEXT,
+        result TEXT NOT NULL,
         reddit_url TEXT
       )
     `);
 
     this.db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_processed_at
-      ON processed_mentions(processed_at)
+      CREATE INDEX IF NOT EXISTS idx_mentions_processed_at
+      ON mentions(processed_at DESC)
     `);
+
+    // Migrate old data if exists
+    this.migrateOldSchema();
+  }
+
+  private migrateOldSchema(): void {
+    // Check if old table exists
+    const oldTable = this.db.prepare(`
+      SELECT name FROM sqlite_master WHERE type='table' AND name='processed_mentions'
+    `).get();
+
+    if (oldTable) {
+      // Migrate data from old table to new
+      this.db.exec(`
+        INSERT OR IGNORE INTO mentions (mention_id, author_username, author_id, mention_text, processed_at, result, reddit_url)
+        SELECT mention_id, 'unknown', 'unknown', '', processed_at, COALESCE(result, 'unknown'), reddit_url
+        FROM processed_mentions
+      `);
+      // Drop old table
+      this.db.exec('DROP TABLE processed_mentions');
+      console.log('Migrated old database schema to new format');
+    }
   }
 
   isProcessed(mentionId: string): boolean {
-    const stmt = this.db.prepare('SELECT 1 FROM processed_mentions WHERE mention_id = ?');
+    const stmt = this.db.prepare('SELECT 1 FROM mentions WHERE mention_id = ?');
     const result = stmt.get(mentionId);
     return result !== undefined && result !== null;
   }
 
-  markProcessed(mentionId: string, result: string, redditUrl?: string): void {
+  saveMention(data: {
+    mentionId: string;
+    authorUsername: string;
+    authorId: string;
+    mentionText: string;
+    parentTweetId?: string;
+    parentAuthor?: string;
+    parentText?: string;
+    imageUrl?: string;
+    extractedSubreddit?: string;
+    extractedUsername?: string;
+    extractedTitle?: string;
+    result: string;
+    redditUrl?: string;
+  }): void {
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO processed_mentions (mention_id, processed_at, result, reddit_url)
-      VALUES (?, ?, ?, ?)
+      INSERT OR REPLACE INTO mentions (
+        mention_id, author_username, author_id, mention_text,
+        parent_tweet_id, parent_author, parent_text, image_url,
+        extracted_subreddit, extracted_username, extracted_title,
+        processed_at, result, reddit_url
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    stmt.run(mentionId, new Date().toISOString(), result, redditUrl || null);
+    stmt.run(
+      data.mentionId,
+      data.authorUsername,
+      data.authorId,
+      data.mentionText,
+      data.parentTweetId || null,
+      data.parentAuthor || null,
+      data.parentText || null,
+      data.imageUrl || null,
+      data.extractedSubreddit || null,
+      data.extractedUsername || null,
+      data.extractedTitle || null,
+      new Date().toISOString(),
+      data.result,
+      data.redditUrl || null
+    );
+  }
+
+  // Legacy method for compatibility
+  markProcessed(mentionId: string, result: string, redditUrl?: string): void {
+    // Check if mention already exists
+    const existing = this.db.prepare('SELECT 1 FROM mentions WHERE mention_id = ?').get(mentionId);
+    if (existing) {
+      // Update existing record
+      const stmt = this.db.prepare(`
+        UPDATE mentions SET result = ?, reddit_url = ?, processed_at = ?
+        WHERE mention_id = ?
+      `);
+      stmt.run(result, redditUrl || null, new Date().toISOString(), mentionId);
+    } else {
+      // Insert minimal record
+      this.saveMention({
+        mentionId,
+        authorUsername: 'unknown',
+        authorId: 'unknown',
+        mentionText: '',
+        result,
+        redditUrl,
+      });
+    }
   }
 
   getLastMentionId(): string | undefined {
     const stmt = this.db.prepare(`
-      SELECT mention_id FROM processed_mentions
+      SELECT mention_id FROM mentions
       ORDER BY processed_at DESC
       LIMIT 1
     `);
@@ -57,8 +164,8 @@ export class MentionsDB {
   }
 
   getStats(): { total: number; successful: number; failed: number } {
-    const totalStmt = this.db.prepare('SELECT COUNT(*) as count FROM processed_mentions');
-    const successStmt = this.db.prepare('SELECT COUNT(*) as count FROM processed_mentions WHERE reddit_url IS NOT NULL');
+    const totalStmt = this.db.prepare('SELECT COUNT(*) as count FROM mentions');
+    const successStmt = this.db.prepare('SELECT COUNT(*) as count FROM mentions WHERE reddit_url IS NOT NULL');
 
     const total = (totalStmt.get() as { count: number }).count;
     const successful = (successStmt.get() as { count: number }).count;
@@ -68,6 +175,31 @@ export class MentionsDB {
       successful,
       failed: total - successful,
     };
+  }
+
+  // New methods for dashboard
+  getAllMentions(limit: number = 50): MentionRecord[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM mentions
+      ORDER BY processed_at DESC
+      LIMIT ?
+    `);
+    return stmt.all(limit) as MentionRecord[];
+  }
+
+  getMention(mentionId: string): MentionRecord | null {
+    const stmt = this.db.prepare('SELECT * FROM mentions WHERE mention_id = ?');
+    return (stmt.get(mentionId) as MentionRecord) || null;
+  }
+
+  getRecentSuccesses(limit: number = 10): MentionRecord[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM mentions
+      WHERE reddit_url IS NOT NULL
+      ORDER BY processed_at DESC
+      LIMIT ?
+    `);
+    return stmt.all(limit) as MentionRecord[];
   }
 
   close(): void {

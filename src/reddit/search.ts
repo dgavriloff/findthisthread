@@ -5,6 +5,12 @@ import { RedditSearchResult, RedditSearchResponse, RedditPost, RedditUserComment
 const REDDIT_BASE = 'https://www.reddit.com';
 const USER_AGENT = 'RedditLinkBot/1.0';
 
+// Sanitize Reddit username/subreddit to prevent URL injection
+function sanitizeRedditName(name: string): string {
+  // Reddit names are alphanumeric with underscores, max 20 chars for users, 21 for subreddits
+  return name.replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 25);
+}
+
 export class RedditSearch {
   private async fetchReddit<T>(url: string, silent = false): Promise<T | null> {
     try {
@@ -102,7 +108,7 @@ export class RedditSearch {
   private async searchByAuthorInSubreddit(info: RedditPostInfo): Promise<RedditSearchResult | null> {
     if (!info.subreddit || !info.username) return null;
 
-    const url = `${REDDIT_BASE}/r/${info.subreddit}/search.json?q=author:${info.username}&restrict_sr=on&sort=new&limit=25`;
+    const url = `${REDDIT_BASE}/r/${sanitizeRedditName(info.subreddit)}/search.json?q=author:${encodeURIComponent(sanitizeRedditName(info.username))}&restrict_sr=on&sort=new&limit=25`;
     const response = await this.fetchReddit<RedditSearchResponse>(url);
 
     if (!response?.data?.children?.length) return null;
@@ -117,7 +123,7 @@ export class RedditSearch {
     const keywords = this.extractKeywords(info.title);
     if (!keywords) return null;
 
-    const url = `${REDDIT_BASE}/r/${info.subreddit}/search.json?q=${encodeURIComponent(keywords)}&restrict_sr=on&sort=relevance&limit=25`;
+    const url = `${REDDIT_BASE}/r/${sanitizeRedditName(info.subreddit)}/search.json?q=${encodeURIComponent(keywords)}&restrict_sr=on&sort=relevance&limit=25`;
     const response = await this.fetchReddit<RedditSearchResponse>(url);
 
     if (!response?.data?.children?.length) return null;
@@ -131,7 +137,7 @@ export class RedditSearch {
     const keywords = this.extractKeywords(info.title);
     if (!keywords) return null;
 
-    const url = `${REDDIT_BASE}/search.json?q=${encodeURIComponent(keywords)} author:${info.username}&sort=relevance&limit=25`;
+    const url = `${REDDIT_BASE}/search.json?q=${encodeURIComponent(keywords)}+author:${encodeURIComponent(sanitizeRedditName(info.username))}&sort=relevance&limit=25`;
     const response = await this.fetchReddit<RedditSearchResponse>(url);
 
     if (!response?.data?.children?.length) return null;
@@ -263,26 +269,51 @@ export class RedditSearch {
 
     console.log(`Searching user comments for u/${info.username}...`);
 
-    const url = `${REDDIT_BASE}/user/${info.username}/comments.json?sort=new&limit=100`;
-    const response = await this.fetchReddit<RedditUserCommentsResponse>(url);
+    // Fetch multiple pages of comments to handle active users
+    const allComments: Array<{ kind: string; data: RedditComment }> = [];
+    let after: string | null = null;
+    const maxPages = 10; // Up to 1000 comments
 
-    if (!response?.data?.children?.length) {
+    for (let page = 0; page < maxPages; page++) {
+      const url = `${REDDIT_BASE}/user/${sanitizeRedditName(info.username)}/comments.json?sort=new&limit=100${after ? `&after=${encodeURIComponent(after)}` : ''}`;
+      const response = await this.fetchReddit<RedditUserCommentsResponse>(url);
+
+      if (!response?.data?.children?.length) break;
+
+      allComments.push(...response.data.children);
+      after = response.data.after;
+
+      if (!after) break; // No more pages
+    }
+
+    if (!allComments.length) {
       console.log(`No comments found for user ${info.username}`);
       return null;
     }
 
-    console.log(`Found ${response.data.children.length} comments from u/${info.username}`);
+    console.log(`Found ${allComments.length} comments from u/${info.username}`);
 
     // Search through comments for matching text
     const searchText = (info.title || '') + ' ' + (info.bodySnippet || '');
     const searchKeywords = this.extractKeywords(searchText);
+    // Normalize: remove newlines/extra whitespace that OCR might introduce
+    const rawSnippet = (info.bodySnippet || info.title || '').toLowerCase().replace(/\s+/g, ' ').trim();
+
+
+
+    // Lower threshold for short snippets (they're more likely to be partial matches)
+    const threshold = rawSnippet.length < 80 ? 0.2 : 0.3;
 
     let bestMatch: RedditSearchResult | null = null;
     let bestScore = 0;
+    let debugBestScore = 0;
+    let debugBestComment = '';
 
-    for (const child of response.data.children) {
+    for (const child of allComments) {
       if (child.kind !== 't1') continue; // t1 = comment
       const comment = child.data;
+      // Normalize comment body for comparison
+      const commentBody = comment.body.toLowerCase().replace(/\s+/g, ' ').trim();
 
       // Compare comment body with extracted text
       const commentKeywords = this.extractKeywords(comment.body.substring(0, 300));
@@ -295,13 +326,41 @@ export class RedditSearch {
 
       // Also try direct text comparison
       const directSimilarity = stringSimilarity.compareTwoStrings(
-        (info.bodySnippet || info.title || '').toLowerCase().substring(0, 150),
-        comment.body.toLowerCase().substring(0, 150)
+        rawSnippet.substring(0, 150),
+        commentBody.substring(0, 150)
       );
 
-      const score = Math.max(textSimilarity, directSimilarity);
+      // Check if comment contains the snippet (for short exact matches)
+      // Try multiple substring lengths and also a word-based check
+      let containsMatch = false;
 
-      if (score > bestScore && score > 0.3) {
+      // Method 1: Full snippet (minus 5 chars to allow for trailing punctuation differences)
+      const checkLen = Math.min(50, rawSnippet.length - 5);
+      if (checkLen > 10) {
+        const snippetToFind = rawSnippet.substring(0, checkLen);
+        containsMatch = commentBody.includes(snippetToFind);
+      }
+
+      // Method 2: If no exact match, try a key phrase from the middle of the snippet
+      // This helps when the start has common words like "true", "yeah", etc.
+      if (!containsMatch && rawSnippet.length > 30) {
+        // Extract a unique phrase - skip first 10 chars and take next 40
+        const midSnippet = rawSnippet.substring(10, 50).trim();
+        if (midSnippet.length > 15) {
+          containsMatch = commentBody.includes(midSnippet);
+        }
+      }
+
+      const containsBonus = containsMatch ? 0.5 : 0;
+      const score = Math.max(textSimilarity, directSimilarity, containsBonus);
+
+      // Track best score for debugging
+      if (score > debugBestScore) {
+        debugBestScore = score;
+        debugBestComment = comment.body.substring(0, 60);
+      }
+
+      if (score > bestScore && score > threshold) {
         bestScore = score;
         bestMatch = {
           url: `https://www.reddit.com${comment.permalink}?context=3`,
@@ -313,6 +372,11 @@ export class RedditSearch {
         };
         console.log(`  Found matching comment (score: ${score.toFixed(3)}): "${comment.body.substring(0, 60)}..."`);
       }
+    }
+
+    // Debug: show best score even if below threshold
+    if (!bestMatch && debugBestScore > 0) {
+      console.log(`  Best score was ${debugBestScore.toFixed(3)} (below ${threshold} threshold): "${debugBestComment}..."`);
     }
 
     return bestMatch;

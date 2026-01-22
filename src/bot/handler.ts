@@ -3,31 +3,6 @@ import { VisionExtractor } from '../vision/extractor';
 import { RedditSearch } from '../reddit/search';
 import { MentionsDB } from '../db/mentions';
 import { Mention } from '../twitter/types';
-import { RedditPostInfo } from '../vision/types';
-
-const REPLIES = {
-  found: (url: string) => `Found it!\n\n${url}`,
-
-  notFound: (info: RedditPostInfo) => {
-    const parts: string[] = ["Couldn't locate this post. It may be deleted or from a private subreddit."];
-    if (info.subreddit || info.username) {
-      const searchInfo: string[] = [];
-      if (info.subreddit) searchInfo.push(`r/${info.subreddit}`);
-      if (info.username) searchInfo.push(`u/${info.username}`);
-      parts.push(`\nSearched: ${searchInfo.join(' • ')}`);
-    }
-    return parts.join('');
-  },
-
-  noImage: () =>
-    "I need an image to work with! Tag me on a tweet that contains a Reddit screenshot.",
-
-  notReddit: () =>
-    "That doesn't look like a Reddit screenshot. I can only find links for Reddit posts.",
-
-  error: () =>
-    "Something went wrong on my end. Please try again later!",
-};
 
 export class BotHandler {
   private twitter: TwitterClient;
@@ -59,26 +34,56 @@ export class BotHandler {
       return;
     }
 
+    // Track data for saving
+    let parentTweetId: string | undefined;
+    let parentAuthor: string | undefined;
+    let parentText: string | undefined;
+    let imageUrl: string | undefined;
+    let extractedSubreddit: string | undefined;
+    let extractedUsername: string | undefined;
+    let extractedTitle: string | undefined;
+
     try {
       // Get parent tweet (the one with the screenshot)
       const parentTweet = await this.twitter.getParentTweet(mention.id);
 
       if (!parentTweet) {
         console.log(`No parent tweet found for mention ${mention.id}`);
-        await this.twitter.postReply(mention.id, REPLIES.noImage());
-        if (!this.testMode) this.db.markProcessed(mention.id, 'no_parent');
+        if (!this.testMode) {
+          this.db.saveMention({
+            mentionId: mention.id,
+            authorUsername: mention.author_username,
+            authorId: mention.author_id,
+            mentionText: mention.text,
+            result: 'no_parent',
+          });
+        }
         return;
       }
 
+      parentTweetId = parentTweet.id;
+      parentAuthor = parentTweet.author_username;
+      parentText = parentTweet.text;
+
       if (!parentTweet.media?.length) {
         console.log(`Parent tweet ${parentTweet.id} has no media`);
-        await this.twitter.postReply(mention.id, REPLIES.noImage());
-        if (!this.testMode) this.db.markProcessed(mention.id, 'no_media');
+        if (!this.testMode) {
+          this.db.saveMention({
+            mentionId: mention.id,
+            authorUsername: mention.author_username,
+            authorId: mention.author_id,
+            mentionText: mention.text,
+            parentTweetId,
+            parentAuthor,
+            parentText,
+            result: 'no_media',
+          });
+        }
         return;
       }
 
       // Download the first image
-      const imageUrl = parentTweet.media[0].media_url_https || parentTweet.media[0].url;
+      imageUrl = parentTweet.media[0].media_url_https || parentTweet.media[0].url;
       console.log(`Downloading image from ${imageUrl}`);
       const imageBuffer = await this.twitter.downloadImage(imageUrl);
 
@@ -87,15 +92,30 @@ export class BotHandler {
       const redditInfo = await this.vision.extractRedditInfo(imageBuffer);
       console.log('Extracted info:', JSON.stringify(redditInfo, null, 2));
 
+      extractedSubreddit = redditInfo.subreddit || undefined;
+      extractedUsername = redditInfo.username || undefined;
+      extractedTitle = redditInfo.title || undefined;
+
       // Only fail if we have absolutely nothing to search with
       if (!redditInfo.title && !redditInfo.username && !redditInfo.subreddit) {
         console.log('No searchable information extracted from image');
-        await this.twitter.postReply(mention.id, REPLIES.notReddit());
-        if (!this.testMode) this.db.markProcessed(mention.id, 'insufficient_info');
+        if (!this.testMode) {
+          this.db.saveMention({
+            mentionId: mention.id,
+            authorUsername: mention.author_username,
+            authorId: mention.author_id,
+            mentionText: mention.text,
+            parentTweetId,
+            parentAuthor,
+            parentText,
+            imageUrl,
+            result: 'insufficient_info',
+          });
+        }
         return;
       }
 
-      console.log(`Confidence: ${redditInfo.confidence} - proceeding with search anyway`);
+      console.log(`Confidence: ${redditInfo.confidence} - proceeding with search`);
 
       // Search Reddit
       console.log('Searching Reddit for matching post...');
@@ -103,21 +123,120 @@ export class BotHandler {
 
       if (result) {
         console.log(`Found match: ${result.url} (confidence: ${result.matchConfidence})`);
-        await this.twitter.postReply(mention.id, REPLIES.found(result.url));
-        if (!this.testMode) this.db.markProcessed(mention.id, 'found', result.url);
+        if (!this.testMode) {
+          this.db.saveMention({
+            mentionId: mention.id,
+            authorUsername: mention.author_username,
+            authorId: mention.author_id,
+            mentionText: mention.text,
+            parentTweetId,
+            parentAuthor,
+            parentText,
+            imageUrl,
+            extractedSubreddit,
+            extractedUsername,
+            extractedTitle,
+            result: 'found',
+            redditUrl: result.url,
+          });
+        }
       } else {
         console.log('No matching post found on Reddit');
-        await this.twitter.postReply(mention.id, REPLIES.notFound(redditInfo));
-        if (!this.testMode) this.db.markProcessed(mention.id, 'not_found');
+        if (!this.testMode) {
+          this.db.saveMention({
+            mentionId: mention.id,
+            authorUsername: mention.author_username,
+            authorId: mention.author_id,
+            mentionText: mention.text,
+            parentTweetId,
+            parentAuthor,
+            parentText,
+            imageUrl,
+            extractedSubreddit,
+            extractedUsername,
+            extractedTitle,
+            result: 'not_found',
+          });
+        }
       }
     } catch (error) {
       console.error(`Error handling mention ${mention.id}:`, error);
-      try {
-        await this.twitter.postReply(mention.id, REPLIES.error());
-      } catch (replyError) {
-        console.error('Failed to send error reply:', replyError);
+      if (!this.testMode) {
+        this.db.saveMention({
+          mentionId: mention.id,
+          authorUsername: mention.author_username,
+          authorId: mention.author_id,
+          mentionText: mention.text,
+          parentTweetId,
+          parentAuthor,
+          parentText,
+          imageUrl,
+          extractedSubreddit,
+          extractedUsername,
+          extractedTitle,
+          result: 'error',
+        });
       }
-      if (!this.testMode) this.db.markProcessed(mention.id, 'error');
+    }
+  }
+
+  async reprocessMention(mentionId: string): Promise<{ success: boolean; message: string; url?: string }> {
+    console.log(`Reprocessing mention ${mentionId}...`);
+
+    // Get the existing mention record
+    const existingMention = this.db.getMention(mentionId);
+    if (!existingMention) {
+      return { success: false, message: 'Mention not found in database' };
+    }
+
+    if (!existingMention.image_url) {
+      return { success: false, message: 'No image URL stored for this mention' };
+    }
+
+    try {
+      // Download the image again
+      console.log(`Downloading image from ${existingMention.image_url}`);
+      const imageBuffer = await this.twitter.downloadImage(existingMention.image_url);
+
+      // Extract Reddit info using vision
+      console.log('Extracting Reddit info from image...');
+      const redditInfo = await this.vision.extractRedditInfo(imageBuffer);
+      console.log('Extracted info:', JSON.stringify(redditInfo, null, 2));
+
+      if (!redditInfo.title && !redditInfo.username && !redditInfo.subreddit && !redditInfo.bodySnippet) {
+        return { success: false, message: 'No searchable information extracted from image' };
+      }
+
+      // Search Reddit
+      console.log('Searching Reddit for matching post...');
+      const result = await this.reddit.findRedditPost(redditInfo);
+
+      if (result) {
+        console.log(`Found match: ${result.url} (confidence: ${result.matchConfidence})`);
+        // Update the database record
+        this.db.saveMention({
+          mentionId,
+          authorUsername: existingMention.author_username,
+          authorId: existingMention.author_id,
+          mentionText: existingMention.mention_text || '',
+          parentTweetId: existingMention.parent_tweet_id || undefined,
+          parentAuthor: existingMention.parent_author || undefined,
+          parentText: existingMention.parent_text || undefined,
+          imageUrl: existingMention.image_url || undefined,
+          extractedSubreddit: redditInfo.subreddit || undefined,
+          extractedUsername: redditInfo.username || undefined,
+          extractedTitle: redditInfo.title || undefined,
+          result: 'found',
+          redditUrl: result.url,
+        });
+        return { success: true, message: 'Found matching post', url: result.url };
+      } else {
+        console.log('No matching post found on Reddit');
+        return { success: false, message: 'No matching post found on Reddit' };
+      }
+    } catch (error) {
+      console.error(`Error reprocessing mention ${mentionId}:`, error);
+      return { success: false, message: `Error: ${error instanceof Error ? error.message : 'Unknown error'}` };
     }
   }
 }

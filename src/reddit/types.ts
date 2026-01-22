@@ -44,5 +44,7 @@ export interface RedditUserCommentsResponse {
       kind: string; // "t1" for comments
       data: RedditComment;
     }>;
+    after: string | null; // Pagination cursor
+    before: string | null;
   };
 }
