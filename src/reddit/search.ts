@@ -3,7 +3,8 @@ import { RedditPostInfo } from '../vision/types';
 import { RedditSearchResult, RedditSearchResponse, RedditPost, RedditUserCommentsResponse, RedditComment } from './types';
 
 const REDDIT_BASE = 'https://www.reddit.com';
-const USER_AGENT = 'RedditLinkBot/1.0';
+const USER_AGENT = 'FindThisThread/1.0 (bot; contact: findthisthread@example.com)';
+const REQUEST_DELAY_MS = 1500; // Delay between Reddit API requests to avoid rate limiting
 
 // Sanitize Reddit username/subreddit to prevent URL injection
 function sanitizeRedditName(name: string): string {
@@ -11,14 +12,44 @@ function sanitizeRedditName(name: string): string {
   return name.replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 25);
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 export class RedditSearch {
+  private lastRequestTime = 0;
+
   private async fetchReddit<T>(url: string, silent = false): Promise<T | null> {
+    // Rate limiting: ensure minimum delay between requests
+    const now = Date.now();
+    const timeSinceLastRequest = now - this.lastRequestTime;
+    if (timeSinceLastRequest < REQUEST_DELAY_MS) {
+      await sleep(REQUEST_DELAY_MS - timeSinceLastRequest);
+    }
+    this.lastRequestTime = Date.now();
+
     try {
       const response = await fetch(url, {
         headers: {
           'User-Agent': USER_AGENT,
         },
       });
+
+      // Handle rate limiting with retry
+      if (response.status === 429) {
+        console.log('Rate limited by Reddit, waiting 5 seconds...');
+        await sleep(5000);
+        this.lastRequestTime = Date.now();
+        // Retry once
+        const retryResponse = await fetch(url, {
+          headers: { 'User-Agent': USER_AGENT },
+        });
+        if (!retryResponse.ok) {
+          if (!silent) console.error(`Reddit API error (${retryResponse.status}): ${url}`);
+          return null;
+        }
+        return retryResponse.json();
+      }
 
       if (!response.ok) {
         // 404s are expected when subreddits don't exist - only log other errors

@@ -9,8 +9,8 @@ export interface BotState {
   isRunning: boolean;
 }
 
-// Frontend URL for CORS (set via env or default to localhost for dev)
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3001';
+// Frontend URL for CORS (set via env or default to allow all for easier setup)
+const FRONTEND_URL = process.env.FRONTEND_URL;
 
 export function createServer(
   db: MentionsDB,
@@ -25,8 +25,13 @@ export function createServer(
   app.get('/', (c) => c.json({ status: 'ok', service: 'findthisthread-api' }));
 
   // Enable CORS for all routes (frontend is on different domain)
+  // Allow all origins if FRONTEND_URL not set (for easier initial setup)
+  const allowedOrigins = FRONTEND_URL
+    ? [FRONTEND_URL, 'http://localhost:3000', 'http://localhost:3001']
+    : '*';
+
   app.use('*', cors({
-    origin: [FRONTEND_URL, 'http://localhost:3000', 'http://localhost:3001'],
+    origin: allowedOrigins as any,
     allowMethods: ['GET', 'POST', 'OPTIONS'],
     allowHeaders: ['Content-Type'],
   }));
