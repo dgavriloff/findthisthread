@@ -1,6 +1,5 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { serveStatic } from 'hono/bun';
 import { MentionsDB, MentionRecord } from '../db/mentions';
 
 export interface BotState {
@@ -9,6 +8,9 @@ export interface BotState {
   pollIntervalMs: number;
   isRunning: boolean;
 }
+
+// Frontend URL for CORS (set via env or default to localhost for dev)
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3001';
 
 export function createServer(
   db: MentionsDB,
@@ -20,9 +22,14 @@ export function createServer(
 
   // Health check endpoint (for Railway)
   app.get('/health', (c) => c.text('OK'));
+  app.get('/', (c) => c.json({ status: 'ok', service: 'findthisthread-api' }));
 
-  // Enable CORS for API routes
-  app.use('/api/*', cors());
+  // Enable CORS for all routes (frontend is on different domain)
+  app.use('*', cors({
+    origin: [FRONTEND_URL, 'http://localhost:3000', 'http://localhost:3001'],
+    allowMethods: ['GET', 'POST', 'OPTIONS'],
+    allowHeaders: ['Content-Type'],
+  }));
 
   // API: Get bot status and timer info
   app.get('/api/status', (c) => {
@@ -76,29 +83,6 @@ export function createServer(
       return c.json({ error: 'Mention not found' }, 404);
     }
     return c.json({ mention });
-  });
-
-  // Serve static files from public directory
-  app.use('/*', serveStatic({ root: './public' }));
-
-  // Fallback to index.html for SPA routing
-  app.get('*', async (c) => {
-    try {
-      const html = await Bun.file('./public/index.html').text();
-      return c.html(html);
-    } catch {
-      // If index.html not found, return a basic status page
-      return c.html(`
-        <!DOCTYPE html>
-        <html>
-        <head><title>FindThisThread Bot</title></head>
-        <body>
-          <h1>FindThisThread Bot</h1>
-          <p>Bot is running. <a href="/api/status">View API Status</a></p>
-        </body>
-        </html>
-      `);
-    }
   });
 
   return app;

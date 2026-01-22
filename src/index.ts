@@ -62,27 +62,16 @@ async function main(): Promise<void> {
   const db = new MentionsDB(DATABASE_PATH);
   const handler = new BotHandler(twitter, vision, reddit, db, TEST_MODE);
 
-  // Start web server
+  // Start API server
   const app = createServer(db, () => botState, triggerRefresh, (mentionId) => handler.reprocessMention(mentionId));
+
+  console.log(`Starting API server on port ${PORT}...`);
   const server = Bun.serve({
     port: PORT,
     hostname: '0.0.0.0',
-    async fetch(req) {
-      try {
-        const url = new URL(req.url);
-        // Simple health check that bypasses Hono
-        if (url.pathname === '/health') {
-          return new Response('OK', { status: 200 });
-        }
-        // Pass to Hono for everything else
-        return await app.fetch(req);
-      } catch (error) {
-        console.error('Request error:', error);
-        return new Response('Internal Server Error', { status: 500 });
-      }
-    },
+    fetch: app.fetch,
   });
-  console.log(`Server listening on 0.0.0.0:${server.port}`);
+  console.log(`API server running at http://0.0.0.0:${server.port}`);
 
   // Get last processed mention ID from database
   let lastMentionId: string | undefined = TEST_MODE ? undefined : db.getLastMentionId();
