@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { RefreshCw, ExternalLink, Check, X, Clock, RotateCcw } from "lucide-react";
+import { RefreshCw, ExternalLink, Check, X, RotateCcw } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
 const WS_URL = API_URL.replace(/^http/, "ws") + "/ws";
@@ -114,22 +114,11 @@ export default function Dashboard() {
     }
   };
 
-  const formatTime = (ms: number) => {
-    const seconds = Math.floor(ms / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return minutes > 0 ? `${minutes}m ${secs}s` : `${secs}s`;
-  };
-
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);
     return date.toLocaleDateString(undefined, { month: "short", day: "numeric" }) +
       " " + date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
   };
-
-  const progressPercent = status
-    ? Math.max(0, Math.min(100, ((status.pollIntervalMs - status.timeUntilNextCheck) / status.pollIntervalMs) * 100))
-    : 0;
 
   if (loading) {
     return (
@@ -147,7 +136,7 @@ export default function Dashboard() {
       {/* Sticky header */}
       <header className="sticky top-0 z-40 bg-background/95 backdrop-blur-sm border-b border-border">
         <div className="px-4 py-3 max-w-2xl mx-auto">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between">
             <div>
               <h1 className="text-lg font-semibold tracking-tight">findthisthread</h1>
               <p className="text-xs text-muted-foreground">reddit link finder</p>
@@ -160,22 +149,6 @@ export default function Dashboard() {
               <RefreshCw className={`h-3 w-3 ${refreshing ? "animate-spin" : ""}`} />
               check now
             </button>
-          </div>
-
-          {/* Progress bar */}
-          <div className="flex items-center gap-3">
-            <div className="flex-1">
-              <div className="h-1 bg-secondary rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-[#FF4500] rounded-full transition-all duration-300 ease-linear"
-                  style={{ width: `${progressPercent}%` }}
-                />
-              </div>
-            </div>
-            <span className="text-[10px] text-muted-foreground font-mono-data whitespace-nowrap flex items-center gap-1">
-              <Clock className="h-3 w-3" />
-              {formatTime(status?.timeUntilNextCheck || 0)}
-            </span>
           </div>
         </div>
       </header>
