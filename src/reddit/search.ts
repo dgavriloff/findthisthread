@@ -77,12 +77,16 @@ export class RedditSearch {
     }
   }
 
+  // Track last fetch status for error detection
+  private lastFetchStatus: number = 0;
+
   private async fetchReddit<T>(url: string, silent = false): Promise<T | null> {
     // If we're in rate limit cooldown, skip entirely
     const now = Date.now();
     if (now < this.rateLimitedUntil) {
       const waitTime = Math.ceil((this.rateLimitedUntil - now) / 1000);
       console.log(`Rate limited, skipping request (${waitTime}s remaining)`);
+      this.lastFetchStatus = 429;
       return null;
     }
 
@@ -106,6 +110,7 @@ export class RedditSearch {
       }
 
       const response = await fetch(requestUrl, { headers });
+      this.lastFetchStatus = response.status;
 
       // Handle rate limiting with exponential backoff
       if (response.status === 429) {
@@ -132,8 +137,14 @@ export class RedditSearch {
       return response.json();
     } catch (error) {
       if (!silent) console.error('Reddit fetch error:', error);
+      this.lastFetchStatus = 0;
       return null;
     }
+  }
+
+  // Check if last fetch was a 404 (user/subreddit not found)
+  wasNotFound(): boolean {
+    return this.lastFetchStatus === 404;
   }
 
   // Check if we're currently rate limited
@@ -162,6 +173,13 @@ export class RedditSearch {
       }
 
       const result = await fn();
+
+      // If we got a user_not_found error, return it immediately
+      if (result?.error === 'user_not_found') {
+        console.log(`Strategy '${name}' found user does not exist`);
+        return result;
+      }
+
       // Only return immediately if confidence is very high (>0.8)
       if (result && result.matchConfidence >= 0.8) {
         console.log(`Strategy '${name}' found high-confidence match`);
@@ -383,6 +401,7 @@ export class RedditSearch {
     const allComments: Array<{ kind: string; data: RedditComment }> = [];
     let after: string | null = null;
     const maxPages = 5;
+    let userNotFound = false;
 
     for (let page = 0; page < maxPages; page++) {
       // Check rate limit before each page
@@ -394,12 +413,31 @@ export class RedditSearch {
       const url = `${REDDIT_BASE}/user/${sanitizeRedditName(info.username)}/comments.json?sort=new&limit=100${after ? `&after=${encodeURIComponent(after)}` : ''}`;
       const response = await this.fetchReddit<RedditUserCommentsResponse>(url);
 
+      // Check if user doesn't exist (404)
+      if (!response && this.wasNotFound()) {
+        console.log(`User u/${info.username} not found (deleted or suspended)`);
+        userNotFound = true;
+        break;
+      }
+
       if (!response?.data?.children?.length) break;
 
       allComments.push(...response.data.children);
       after = response.data.after;
 
       if (!after) break; // No more pages
+    }
+
+    // Return special error result if user not found
+    if (userNotFound) {
+      return {
+        url: '',
+        title: '',
+        author: info.username,
+        subreddit: '',
+        matchConfidence: 0,
+        error: 'user_not_found',
+      };
     }
 
     if (!allComments.length) {

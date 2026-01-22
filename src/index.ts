@@ -192,7 +192,10 @@ async function main(): Promise<void> {
         console.log(`Found ${mentions.length} new mention(s)`);
 
         for (const mention of mentions.reverse()) {
-          await handler.handleMention(mention);
+          // Pass onProgress callback to broadcast immediately when processing starts
+          await handler.handleMention(mention, () => {
+            broadcast('mentions', db.getAllMentions(50));
+          });
           // Broadcast updated mentions after each one is processed
           broadcast('mentions', db.getAllMentions(50));
           broadcast('status', { ...botState, stats: db.getStats(), currentTime: Date.now(), timeUntilNextCheck: Math.max(0, botState.nextCheckTime - Date.now()) });
@@ -231,14 +234,10 @@ async function main(): Promise<void> {
   while (true) {
     await sleep(1000);
 
-    const now = Date.now();
-    const shouldCheck = refreshRequested || now >= botState.nextCheckTime;
-
-    if (shouldCheck) {
-      if (refreshRequested) {
-        console.log('Manual refresh triggered');
-        refreshRequested = false;
-      }
+    // Only check when manually triggered (no auto-polling)
+    if (refreshRequested) {
+      console.log('Manual refresh triggered');
+      refreshRequested = false;
       await checkMentions();
     }
   }

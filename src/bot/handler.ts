@@ -25,7 +25,7 @@ export class BotHandler {
     this.testMode = testMode;
   }
 
-  async handleMention(mention: Mention): Promise<void> {
+  async handleMention(mention: Mention, onProgress?: () => void): Promise<void> {
     console.log(`Processing mention ${mention.id} from @${mention.author_username}`);
 
     // Check if already processed (skip in test mode)
@@ -42,6 +42,18 @@ export class BotHandler {
     let extractedSubreddit: string | undefined;
     let extractedUsername: string | undefined;
     let extractedTitle: string | undefined;
+
+    // Save immediately with "processing" status so UI shows it right away
+    if (!this.testMode) {
+      this.db.saveMention({
+        mentionId: mention.id,
+        authorUsername: mention.author_username,
+        authorId: mention.author_id,
+        mentionText: mention.text,
+        result: 'processing',
+      });
+      onProgress?.();
+    }
 
     try {
       // Get parent tweet (the one with the screenshot)
@@ -121,7 +133,25 @@ export class BotHandler {
       console.log('Searching Reddit for matching post...');
       const result = await this.reddit.findRedditPost(redditInfo);
 
-      if (result) {
+      if (result?.error === 'user_not_found') {
+        console.log(`Reddit user u/${extractedUsername} not found (deleted or suspended)`);
+        if (!this.testMode) {
+          this.db.saveMention({
+            mentionId: mention.id,
+            authorUsername: mention.author_username,
+            authorId: mention.author_id,
+            mentionText: mention.text,
+            parentTweetId,
+            parentAuthor,
+            parentText,
+            imageUrl,
+            extractedSubreddit,
+            extractedUsername,
+            extractedTitle,
+            result: 'user_not_found',
+          });
+        }
+      } else if (result && !result.error) {
         console.log(`Found match: ${result.url} (confidence: ${result.matchConfidence})`);
         if (!this.testMode) {
           this.db.saveMention({

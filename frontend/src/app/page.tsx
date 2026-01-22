@@ -226,10 +226,15 @@ export default function Dashboard() {
                           <Check className="h-3 w-3" />
                           found
                         </span>
+                      ) : mention.result === "processing" ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-500">
+                          <RefreshCw className="h-3 w-3 animate-spin" />
+                          searching...
+                        </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-[10px] font-medium text-red-500">
                           <X className="h-3 w-3" />
-                          {mention.result.toLowerCase()}
+                          {mention.result === "user_not_found" ? "user deleted" : mention.result.toLowerCase()}
                         </span>
                       )}
                       <span className="text-[10px] text-muted-foreground">
@@ -289,6 +294,10 @@ export default function Dashboard() {
                       <ExternalLink className="h-3 w-3" />
                       reddit
                     </a>
+                  ) : mention.result === "processing" ? (
+                    <div className="w-8 h-8 flex items-center justify-center">
+                      <RefreshCw className="h-3.5 w-3.5 text-amber-500 animate-spin" />
+                    </div>
                   ) : (
                     <button
                       onClick={() => reprocessMention(mention.mention_id)}
