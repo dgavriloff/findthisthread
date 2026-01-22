@@ -27,6 +27,7 @@ interface Mention {
   extracted_title: string | null;
   image_url: string | null;
   parent_author: string | null;
+  parent_tweet_id: string | null;
   mention_text: string | null;
 }
 
@@ -238,16 +239,30 @@ export default function Dashboard() {
 
                     {/* Users */}
                     <div className="text-xs space-y-0.5">
-                      {mention.parent_author && mention.parent_author !== "unknown" && (
+                      {mention.parent_author && mention.parent_author !== "unknown" && mention.parent_tweet_id && (
                         <div className="truncate">
                           <span className="text-muted-foreground">posted by </span>
-                          <span className="font-medium">@{mention.parent_author}</span>
+                          <a
+                            href={`https://x.com/${mention.parent_author}/status/${mention.parent_tweet_id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-medium hover:underline"
+                          >
+                            @{mention.parent_author}
+                          </a>
                         </div>
                       )}
                       {mention.author_username && mention.author_username !== "unknown" && (
                         <div className="truncate">
                           <span className="text-muted-foreground">requested by </span>
-                          <span className="font-medium">@{mention.author_username}</span>
+                          <a
+                            href={`https://x.com/${mention.author_username}/status/${mention.mention_id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-medium hover:underline"
+                          >
+                            @{mention.author_username}
+                          </a>
                         </div>
                       )}
                     </div>
