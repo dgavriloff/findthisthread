@@ -179,7 +179,26 @@ TEST_MODE=true             # Enable test mode
 
 ## Deployment (Railway)
 
-### 1. Create Railway Project
+### Option A: Deploy from GitHub (Recommended)
+
+1. **Go to [railway.app](https://railway.app)** and sign in with GitHub
+
+2. **Create New Project** → "Deploy from GitHub repo" → Select `findthisthread`
+
+3. **Add a Volume** (for persistent database):
+   - Click on your service → Settings → Volumes
+   - Add volume with mount path: `/data`
+
+4. **Set Environment Variables**:
+   - Click on your service → Variables → Add:
+   ```
+   TWITTER_API_KEY=your_key_here
+   GEMINI_API_KEY=your_key_here
+   ```
+
+5. **Deploy** - Railway auto-deploys on every push to `master`
+
+### Option B: Deploy via CLI
 
 ```bash
 # Install Railway CLI
@@ -188,34 +207,18 @@ npm i -g @railway/cli
 # Login and init
 railway login
 railway init
-```
 
-### 2. Add Volume for Persistent Storage
-
-1. Go to your service in Railway dashboard
-2. Settings → Volumes
-3. Add volume with mount path: `/data`
-
-The app auto-detects Railway and uses `/data/mentions.db` for the database.
-
-### 3. Set Environment Variables
-
-In Railway dashboard → Variables:
-
-```
-TWITTER_API_KEY=xxx
-GEMINI_API_KEY=xxx
-```
-
-Railway automatically sets `PORT` and `RAILWAY_ENVIRONMENT`.
-
-### 4. Deploy
-
-```bash
+# Deploy
 railway up
 ```
 
-Or connect your GitHub repo for automatic deploys.
+Then add volume and env vars via the dashboard (steps 3-4 above).
+
+### Notes
+
+- Railway automatically sets `PORT` and `RAILWAY_ENVIRONMENT`
+- The app auto-detects Railway and uses `/data/mentions.db` for the database
+- Dashboard will be at your Railway URL (e.g., `findthisthread-production.up.railway.app`)
 
 ## Limitations
 
