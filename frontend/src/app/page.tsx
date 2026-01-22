@@ -45,6 +45,7 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
+  const [modalImage, setModalImage] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -285,13 +286,13 @@ export default function Dashboard() {
                     className="flex items-start gap-4 p-4 rounded-lg border bg-card"
                   >
                     {mention.image_url && (
-                      <a href={mention.image_url} target="_blank" rel="noopener noreferrer" className="flex-shrink-0">
+                      <button onClick={() => setModalImage(mention.image_url)} className="flex-shrink-0">
                         <img
                           src={mention.image_url}
                           alt="Screenshot"
-                          className="w-20 h-20 object-cover rounded-md border hover:opacity-80 transition-opacity"
+                          className="w-20 h-20 object-cover rounded-md border hover:opacity-80 transition-opacity cursor-pointer"
                         />
-                      </a>
+                      </button>
                     )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
@@ -336,6 +337,29 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Image Modal */}
+      {modalImage && (
+        <div
+          className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
+          onClick={() => setModalImage(null)}
+        >
+          <div className="relative max-w-4xl max-h-[90vh]">
+            <img
+              src={modalImage}
+              alt="Screenshot"
+              className="max-w-full max-h-[90vh] object-contain rounded-lg"
+              onClick={(e) => e.stopPropagation()}
+            />
+            <button
+              onClick={() => setModalImage(null)}
+              className="absolute -top-3 -right-3 bg-white text-black rounded-full w-8 h-8 flex items-center justify-center hover:bg-gray-200 font-bold"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
