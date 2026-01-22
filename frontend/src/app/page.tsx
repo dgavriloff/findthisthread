@@ -282,8 +282,17 @@ export default function Dashboard() {
                 mentions.map((mention) => (
                   <div
                     key={mention.mention_id}
-                    className="flex items-center justify-between p-4 rounded-lg border bg-card"
+                    className="flex items-start gap-4 p-4 rounded-lg border bg-card"
                   >
+                    {mention.image_url && (
+                      <a href={mention.image_url} target="_blank" rel="noopener noreferrer" className="flex-shrink-0">
+                        <img
+                          src={mention.image_url}
+                          alt="Screenshot"
+                          className="w-20 h-20 object-cover rounded-md border hover:opacity-80 transition-opacity"
+                        />
+                      </a>
+                    )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="font-medium">@{mention.author_username}</span>
@@ -306,7 +315,7 @@ export default function Dashboard() {
                       </div>
                       <div className="text-xs text-muted-foreground mt-1">{formatDate(mention.processed_at)}</div>
                     </div>
-                    <div className="flex items-center gap-2 ml-4">
+                    <div className="flex items-center gap-2 flex-shrink-0">
                       {mention.reddit_url ? (
                         <a href={mention.reddit_url} target="_blank" rel="noopener noreferrer">
                           <Button size="sm" className="bg-[#FF4500] hover:bg-[#FF5722] text-white">
