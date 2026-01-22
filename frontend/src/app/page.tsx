@@ -309,8 +309,9 @@ export default function Dashboard() {
                     <div className="flex items-center gap-2 ml-4">
                       {mention.reddit_url ? (
                         <a href={mention.reddit_url} target="_blank" rel="noopener noreferrer">
-                          <Button variant="outline" size="sm">
-                            <ExternalLink className="h-4 w-4" />
+                          <Button size="sm" className="bg-[#FF4500] hover:bg-[#FF5722] text-white">
+                            <ExternalLink className="mr-1 h-4 w-4" />
+                            Go to Reddit
                           </Button>
                         </a>
                       ) : (
