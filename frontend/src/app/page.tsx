@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, ExternalLink, CheckCircle, XCircle, Clock, Activity, Wifi, WifiOff } from "lucide-react";
+import { RefreshCw, ExternalLink, CheckCircle, XCircle, Clock } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
 // Convert http(s) to ws(s) for WebSocket URL
@@ -176,12 +176,12 @@ export default function Dashboard() {
       <div className="min-h-screen flex items-center justify-center p-4">
         <Card className="w-full max-w-md">
           <CardHeader>
-            <CardTitle className="text-destructive">Connection Error</CardTitle>
+            <CardTitle className="text-destructive">connection error</CardTitle>
             <CardDescription>{error}</CardDescription>
           </CardHeader>
           <CardContent>
             <Button onClick={connect} className="w-full">
-              <RefreshCw className="mr-2 h-4 w-4" /> Retry
+              <RefreshCw className="mr-2 h-4 w-4" /> retry
             </Button>
           </CardContent>
         </Card>
@@ -197,32 +197,9 @@ export default function Dashboard() {
     <div className="min-h-screen p-4 md:p-8">
       <div className="max-w-6xl mx-auto space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold">FindThisThread</h1>
-            <p className="text-muted-foreground">Reddit Screenshot Bot Dashboard</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 text-sm">
-              {connectionStatus === "connected" ? (
-                <Badge variant="outline" className="text-green-500 border-green-500">
-                  <Wifi className="mr-1 h-3 w-3" /> Live
-                </Badge>
-              ) : connectionStatus === "connecting" ? (
-                <Badge variant="outline" className="text-yellow-500 border-yellow-500">
-                  <RefreshCw className="mr-1 h-3 w-3 animate-spin" /> Connecting
-                </Badge>
-              ) : (
-                <Badge variant="outline" className="text-red-500 border-red-500">
-                  <WifiOff className="mr-1 h-3 w-3" /> Offline
-                </Badge>
-              )}
-            </div>
-            <Button onClick={triggerRefresh} disabled={refreshing || connectionStatus !== "connected"}>
-              <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
-              Check Now
-            </Button>
-          </div>
+        <div>
+          <h1 className="text-3xl font-bold">findthisthread</h1>
+          <p className="text-muted-foreground">reddit screenshot bot dashboard</p>
         </div>
 
         {/* Timer Bar */}
@@ -231,56 +208,34 @@ export default function Dashboard() {
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm text-muted-foreground flex items-center">
                 <Clock className="mr-2 h-4 w-4" />
-                Next check in {formatTime(status?.timeUntilNextCheck || 0)}
+                checking for link requests in {formatTime(status?.timeUntilNextCheck || 0)}
               </span>
-              <Badge variant={status?.isRunning ? "success" : "destructive"}>
-                {status?.isRunning ? "Running" : "Stopped"}
-              </Badge>
             </div>
-            <div className="w-full bg-secondary rounded-full h-2 overflow-hidden">
-              <div
-                className="bg-primary h-2 rounded-full transition-all duration-300 ease-linear"
-                style={{ width: `${progressPercent}%` }}
-              />
+            <div className="flex items-center gap-3">
+              <div className="flex-1 bg-secondary rounded-full h-2 overflow-hidden">
+                <div
+                  className="bg-primary h-2 rounded-full transition-all duration-300 ease-linear"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+              <Button size="sm" onClick={triggerRefresh} disabled={refreshing || connectionStatus !== "connected"}>
+                <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+                check now
+              </Button>
             </div>
           </CardContent>
         </Card>
 
-        {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription>Total Processed</CardDescription>
-              <CardTitle className="text-4xl">{status?.stats.total || 0}</CardTitle>
-            </CardHeader>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription>Successful</CardDescription>
-              <CardTitle className="text-4xl text-green-500">{status?.stats.successful || 0}</CardTitle>
-            </CardHeader>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription>Failed</CardDescription>
-              <CardTitle className="text-4xl text-red-500">{status?.stats.failed || 0}</CardTitle>
-            </CardHeader>
-          </Card>
-        </div>
-
-        {/* Mentions Table */}
+        {/* Link Requests */}
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center">
-              <Activity className="mr-2 h-5 w-5" />
-              Recent Mentions
-            </CardTitle>
-            <CardDescription>Last 50 processed mentions</CardDescription>
+            <CardTitle>link requests</CardTitle>
+            <CardDescription>last 50 processed requests</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
               {mentions.length === 0 ? (
-                <p className="text-center text-muted-foreground py-8">No mentions processed yet</p>
+                <p className="text-center text-muted-foreground py-8">no link requests yet</p>
               ) : (
                 mentions.map((mention) => (
                   <div
@@ -300,23 +255,23 @@ export default function Dashboard() {
                       <div className="flex items-center gap-2 mb-1">
                         {mention.reddit_url ? (
                           <Badge variant="success" className="flex items-center gap-1">
-                            <CheckCircle className="h-3 w-3" /> Found
+                            <CheckCircle className="h-3 w-3" /> found
                           </Badge>
                         ) : (
                           <Badge variant="destructive" className="flex items-center gap-1">
-                            <XCircle className="h-3 w-3" /> {mention.result}
+                            <XCircle className="h-3 w-3" /> {mention.result.toLowerCase()}
                           </Badge>
                         )}
                       </div>
                       <div className="text-sm space-y-0.5">
                         {mention.parent_author && (
-                          <div><span className="text-muted-foreground">Screenshot posted by:</span> <span className="font-medium">@{mention.parent_author}</span></div>
+                          <div><span className="text-muted-foreground">screenshot posted by:</span> <span className="font-medium">@{mention.parent_author}</span></div>
                         )}
-                        <div><span className="text-muted-foreground">Link requested by:</span> <span className="font-medium">@{mention.author_username}</span></div>
+                        <div><span className="text-muted-foreground">link requested by:</span> <span className="font-medium">@{mention.author_username}</span></div>
                         {mention.mention_text && (() => {
                           const tagText = mention.mention_text.replace(/@\w+/g, '').trim();
                           return tagText ? (
-                            <div><span className="text-muted-foreground">Tag:</span> <span className="italic">"{tagText}"</span></div>
+                            <div><span className="text-muted-foreground">tag:</span> <span className="italic">"{tagText}"</span></div>
                           ) : null;
                         })()}
                       </div>
@@ -334,7 +289,7 @@ export default function Dashboard() {
                         <a href={mention.reddit_url} target="_blank" rel="noopener noreferrer">
                           <Button size="sm" className="bg-[#FF4500] hover:bg-[#FF5722] text-white">
                             <ExternalLink className="mr-1 h-4 w-4" />
-                            Go to Reddit
+                            go to reddit
                           </Button>
                         </a>
                       ) : (
