@@ -4,7 +4,7 @@ import { RedditSearchResult, RedditSearchResponse, RedditPost, RedditUserComment
 
 const REDDIT_BASE = 'https://www.reddit.com';
 const USER_AGENT = 'FindThisThread/1.0 (bot; contact: findthisthread@example.com)';
-const REQUEST_DELAY_MS = 1500; // Delay between Reddit API requests to avoid rate limiting
+const BASE_DELAY_MS = 6000; // 6 seconds between requests (Reddit allows ~10 req/min unauthenticated)
 
 // Sanitize Reddit username/subreddit to prevent URL injection
 function sanitizeRedditName(name: string): string {
@@ -18,13 +18,22 @@ function sleep(ms: number): Promise<void> {
 
 export class RedditSearch {
   private lastRequestTime = 0;
+  private currentDelay = BASE_DELAY_MS;
+  private rateLimitedUntil = 0; // Timestamp when rate limit expires
 
   private async fetchReddit<T>(url: string, silent = false): Promise<T | null> {
-    // Rate limiting: ensure minimum delay between requests
+    // If we're in rate limit cooldown, skip entirely
     const now = Date.now();
+    if (now < this.rateLimitedUntil) {
+      const waitTime = Math.ceil((this.rateLimitedUntil - now) / 1000);
+      console.log(`Rate limited, skipping request (${waitTime}s remaining)`);
+      return null;
+    }
+
+    // Rate limiting: ensure minimum delay between requests
     const timeSinceLastRequest = now - this.lastRequestTime;
-    if (timeSinceLastRequest < REQUEST_DELAY_MS) {
-      await sleep(REQUEST_DELAY_MS - timeSinceLastRequest);
+    if (timeSinceLastRequest < this.currentDelay) {
+      await sleep(this.currentDelay - timeSinceLastRequest);
     }
     this.lastRequestTime = Date.now();
 
@@ -35,20 +44,18 @@ export class RedditSearch {
         },
       });
 
-      // Handle rate limiting with retry
+      // Handle rate limiting with exponential backoff
       if (response.status === 429) {
-        console.log('Rate limited by Reddit, waiting 5 seconds...');
-        await sleep(5000);
-        this.lastRequestTime = Date.now();
-        // Retry once
-        const retryResponse = await fetch(url, {
-          headers: { 'User-Agent': USER_AGENT },
-        });
-        if (!retryResponse.ok) {
-          if (!silent) console.error(`Reddit API error (${retryResponse.status}): ${url}`);
-          return null;
-        }
-        return retryResponse.json();
+        // Set cooldown period - start with 60 seconds, double each time
+        this.currentDelay = Math.min(this.currentDelay * 2, 60000);
+        this.rateLimitedUntil = Date.now() + 60000; // 60 second cooldown
+        console.log(`Rate limited by Reddit. Cooling down for 60s. Next delay: ${this.currentDelay/1000}s`);
+        return null;
+      }
+
+      // Success - gradually reduce delay back to base
+      if (this.currentDelay > BASE_DELAY_MS) {
+        this.currentDelay = Math.max(BASE_DELAY_MS, this.currentDelay * 0.8);
       }
 
       if (!response.ok) {
@@ -66,22 +73,30 @@ export class RedditSearch {
     }
   }
 
+  // Check if we're currently rate limited
+  isRateLimited(): boolean {
+    return Date.now() < this.rateLimitedUntil;
+  }
+
   async findRedditPost(info: RedditPostInfo): Promise<RedditSearchResult | null> {
-    // Try multiple search strategies - order matters!
-    // Prioritize exact title matches first
+    // Reduced set of strategies - prioritize most effective ones
+    // Each strategy makes 1-2 API calls, so we need to be conservative
     const strategies = [
-      { name: 'exactTitle', fn: () => this.searchExactTitle(info) },
       { name: 'titleInSubreddit', fn: () => this.searchByTitleInSubreddit(info) },
       { name: 'authorInSubreddit', fn: () => this.searchByAuthorInSubreddit(info) },
-      { name: 'globalWithAuthor', fn: () => this.searchGlobal(info) },
-      { name: 'titleGlobal', fn: () => this.searchByTitleGlobal(info) },
-      { name: 'bodySnippet', fn: () => this.searchByBodySnippet(info) },
+      { name: 'exactTitle', fn: () => this.searchExactTitle(info) },
       { name: 'userComments', fn: () => this.searchUserComments(info) },
     ];
 
     let bestResult: RedditSearchResult | null = null;
 
     for (const { name, fn } of strategies) {
+      // Stop if we hit rate limit
+      if (this.isRateLimited()) {
+        console.log('Rate limited - stopping search early');
+        break;
+      }
+
       const result = await fn();
       // Only return immediately if confidence is very high (>0.8)
       if (result && result.matchConfidence >= 0.8) {
@@ -300,12 +315,18 @@ export class RedditSearch {
 
     console.log(`Searching user comments for u/${info.username}...`);
 
-    // Fetch multiple pages of comments to handle active users
+    // Fetch limited pages to avoid rate limiting (3 pages max = 300 comments)
     const allComments: Array<{ kind: string; data: RedditComment }> = [];
     let after: string | null = null;
-    const maxPages = 10; // Up to 1000 comments
+    const maxPages = 3;
 
     for (let page = 0; page < maxPages; page++) {
+      // Check rate limit before each page
+      if (this.isRateLimited()) {
+        console.log('Rate limited - stopping comment fetch');
+        break;
+      }
+
       const url = `${REDDIT_BASE}/user/${sanitizeRedditName(info.username)}/comments.json?sort=new&limit=100${after ? `&after=${encodeURIComponent(after)}` : ''}`;
       const response = await this.fetchReddit<RedditUserCommentsResponse>(url);
 
