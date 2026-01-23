@@ -21,7 +21,7 @@ export interface MentionRecord {
 }
 
 // Results that are considered complete (final, no retry needed)
-export const COMPLETE_RESULTS = ['found', 'not_found', 'user_not_found'];
+export const COMPLETE_RESULTS = ['found', 'not_found', 'user_not_found', 'no_parent', 'no_media'];
 
 export class MentionsDB {
   private db: Database;
@@ -84,7 +84,7 @@ export class MentionsDB {
       this.db.exec(`
         UPDATE mentions
         SET is_complete = 1
-        WHERE result IN ('found', 'not_found', 'user_not_found')
+        WHERE result IN ('found', 'not_found', 'user_not_found', 'no_parent', 'no_media')
       `);
       console.log('Migration complete: is_complete column added and existing data updated');
     }
@@ -223,6 +223,12 @@ export class MentionsDB {
   getMention(mentionId: string): MentionRecord | null {
     const stmt = this.db.prepare('SELECT * FROM mentions WHERE mention_id = ?');
     return (stmt.get(mentionId) as MentionRecord) || null;
+  }
+
+  deleteMention(mentionId: string): boolean {
+    const stmt = this.db.prepare('DELETE FROM mentions WHERE mention_id = ?');
+    const result = stmt.run(mentionId);
+    return result.changes > 0;
   }
 
   getRecentSuccesses(limit: number = 10): MentionRecord[] {

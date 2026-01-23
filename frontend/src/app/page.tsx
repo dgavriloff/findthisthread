@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { RefreshCw, ExternalLink, Check, X, RotateCcw } from "lucide-react";
+import { RefreshCw, ExternalLink, Check, X, RotateCcw, Trash2 } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
 const WS_URL = API_URL.replace(/^http/, "ws") + "/ws";
@@ -43,6 +43,7 @@ export default function Dashboard() {
   const [modalImage, setModalImage] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [reprocessingId, setReprocessingId] = useState<string | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -89,6 +90,12 @@ export default function Dashboard() {
               setTimeout(() => setToast(null), 3000);
             }
             break;
+          case "delete_result":
+            if (message.data.success) {
+              setToast("request deleted");
+              setTimeout(() => setToast(null), 3000);
+            }
+            break;
         }
       } catch (err) {
         console.error("WebSocket parse error:", err);
@@ -123,6 +130,13 @@ export default function Dashboard() {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       setReprocessingId(mentionId);
       wsRef.current.send(JSON.stringify({ type: "reprocess", mentionId }));
+    }
+  };
+
+  const deleteMention = (mentionId: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "delete", mentionId }));
+      setDeleteConfirmId(null);
     }
   };
 
@@ -273,7 +287,7 @@ export default function Dashboard() {
                 </div>
 
                 {/* Action */}
-                <div className="flex-shrink-0 flex items-center">
+                <div className="flex-shrink-0 flex items-center gap-1">
                   {mention.reddit_url ? (
                     <a
                       href={mention.reddit_url}
@@ -289,13 +303,32 @@ export default function Dashboard() {
                       <RefreshCw className="h-3.5 w-3.5 text-amber-500 animate-spin" />
                     </div>
                   ) : !mention.is_complete ? (
+                    <>
+                      <button
+                        onClick={() => reprocessMention(mention.mention_id)}
+                        disabled={reprocessingId !== null}
+                        className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-border hover:bg-secondary disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        title="retry"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5 text-muted-foreground" />
+                      </button>
+                      {(mention.result === "no_parent" || mention.result === "no_media") && (
+                        <button
+                          onClick={() => setDeleteConfirmId(mention.mention_id)}
+                          className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-red-500/30 hover:bg-red-500/10 transition-colors"
+                          title="delete"
+                        >
+                          <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                        </button>
+                      )}
+                    </>
+                  ) : (mention.result === "no_parent" || mention.result === "no_media") ? (
                     <button
-                      onClick={() => reprocessMention(mention.mention_id)}
-                      disabled={reprocessingId !== null}
-                      className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-border hover:bg-secondary disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                      title="retry"
+                      onClick={() => setDeleteConfirmId(mention.mention_id)}
+                      className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-red-500/30 hover:bg-red-500/10 transition-colors"
+                      title="delete"
                     >
-                      <RotateCcw className="h-3.5 w-3.5 text-muted-foreground" />
+                      <Trash2 className="h-3.5 w-3.5 text-red-500" />
                     </button>
                   ) : null}
                 </div>
@@ -324,6 +357,35 @@ export default function Dashboard() {
             >
               ×
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirmation modal */}
+      {deleteConfirmId && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setDeleteConfirmId(null)}
+        >
+          <div
+            className="bg-card border border-border rounded-md p-4 max-w-xs w-full"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-sm mb-4">delete this request?</p>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setDeleteConfirmId(null)}
+                className="px-3 py-1.5 text-xs font-medium rounded-md border border-border hover:bg-secondary transition-colors"
+              >
+                no
+              </button>
+              <button
+                onClick={() => deleteMention(deleteConfirmId)}
+                className="px-3 py-1.5 text-xs font-medium rounded-md bg-red-500 hover:bg-red-600 text-white transition-colors"
+              >
+                yes, delete
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -153,6 +153,17 @@ async function main(): Promise<void> {
               // Broadcast updated mentions
               broadcast('mentions', db.getAllMentions(50));
             });
+          } else if (data.type === 'delete' && data.mentionId) {
+            const deleted = db.deleteMention(data.mentionId);
+            ws.send(JSON.stringify({
+              type: 'delete_result',
+              data: { success: deleted, mentionId: data.mentionId },
+              timestamp: Date.now()
+            }));
+            if (deleted) {
+              // Broadcast updated mentions to all clients
+              broadcast('mentions', db.getAllMentions(50));
+            }
           }
         } catch (e) {
           // Ignore invalid messages
