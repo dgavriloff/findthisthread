@@ -212,8 +212,11 @@ export class MentionsDB {
 
   // New methods for dashboard
   getAllMentions(limit: number = 50): MentionRecord[] {
+    // Filter out no_parent and no_media - they're saved to prevent re-processing
+    // but shouldn't clutter the UI
     const stmt = this.db.prepare(`
       SELECT * FROM mentions
+      WHERE result NOT IN ('no_parent', 'no_media')
       ORDER BY processed_at DESC
       LIMIT ?
     `);
