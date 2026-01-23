@@ -259,9 +259,42 @@ export class BotHandler {
       console.log('Searching Reddit for matching post...');
       const result = await this.reddit.findRedditPost(redditInfo);
 
-      if (result) {
+      if (result?.error === 'user_not_found') {
+        console.log(`Reddit user not found (deleted or suspended)`);
+        this.db.saveMention({
+          mentionId,
+          authorUsername: existingMention.author_username,
+          authorId: existingMention.author_id,
+          mentionText: existingMention.mention_text || '',
+          parentTweetId: existingMention.parent_tweet_id || undefined,
+          parentAuthor: existingMention.parent_author || undefined,
+          parentText: existingMention.parent_text || undefined,
+          imageUrl: existingMention.image_url || undefined,
+          extractedSubreddit: redditInfo.subreddit || undefined,
+          extractedUsername: redditInfo.username || undefined,
+          extractedTitle: redditInfo.title || undefined,
+          result: 'user_not_found',
+        });
+        return { success: false, message: 'Reddit user not found (deleted or suspended)' };
+      } else if (result?.error === 'rate_limited') {
+        console.log('Reddit rate limited - could not complete search');
+        this.db.saveMention({
+          mentionId,
+          authorUsername: existingMention.author_username,
+          authorId: existingMention.author_id,
+          mentionText: existingMention.mention_text || '',
+          parentTweetId: existingMention.parent_tweet_id || undefined,
+          parentAuthor: existingMention.parent_author || undefined,
+          parentText: existingMention.parent_text || undefined,
+          imageUrl: existingMention.image_url || undefined,
+          extractedSubreddit: redditInfo.subreddit || undefined,
+          extractedUsername: redditInfo.username || undefined,
+          extractedTitle: redditInfo.title || undefined,
+          result: 'rate_limited',
+        });
+        return { success: false, message: 'Reddit says try again later' };
+      } else if (result && !result.error) {
         console.log(`Found match: ${result.url} (confidence: ${result.matchConfidence})`);
-        // Update the database record
         this.db.saveMention({
           mentionId,
           authorUsername: existingMention.author_username,
@@ -280,6 +313,20 @@ export class BotHandler {
         return { success: true, message: 'Found matching post', url: result.url };
       } else {
         console.log('No matching post found on Reddit');
+        this.db.saveMention({
+          mentionId,
+          authorUsername: existingMention.author_username,
+          authorId: existingMention.author_id,
+          mentionText: existingMention.mention_text || '',
+          parentTweetId: existingMention.parent_tweet_id || undefined,
+          parentAuthor: existingMention.parent_author || undefined,
+          parentText: existingMention.parent_text || undefined,
+          imageUrl: existingMention.image_url || undefined,
+          extractedSubreddit: redditInfo.subreddit || undefined,
+          extractedUsername: redditInfo.username || undefined,
+          extractedTitle: redditInfo.title || undefined,
+          result: 'not_found',
+        });
         return { success: false, message: 'No matching post found on Reddit' };
       }
     } catch (error) {
