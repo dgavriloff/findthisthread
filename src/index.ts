@@ -181,10 +181,15 @@ async function main(): Promise<void> {
 
   // Get last processed mention ID from database
   let lastMentionId: string | undefined = TEST_MODE ? undefined : db.getLastMentionId();
-  console.log(`Starting from mention ID: ${lastMentionId || 'beginning'}`);
+  console.log(`Database path: ${DATABASE_PATH}`);
+  console.log(`Starting from mention ID: ${lastMentionId || 'beginning (database empty)'}`);
 
   const stats = db.getStats();
   console.log(`Database stats: ${stats.total} processed, ${stats.successful} successful, ${stats.failed} failed`);
+
+  if (stats.total === 0) {
+    console.log('WARNING: Database is empty - all mentions will be processed from scratch');
+  }
   console.log('\nBot started. Polling for mentions...\n');
 
   // Check for mentions - returns count of new mentions found
