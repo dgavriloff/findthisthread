@@ -17,7 +17,11 @@ export interface MentionRecord {
   processed_at: string;
   result: string;
   reddit_url: string | null;
+  is_complete: number; // 0 = incomplete (can retry), 1 = complete (final result)
 }
+
+// Results that are considered complete (final, no retry needed)
+export const COMPLETE_RESULTS = ['found', 'not_found', 'user_not_found'];
 
 export class MentionsDB {
   private db: Database;
@@ -61,6 +65,29 @@ export class MentionsDB {
 
     // Migrate old data if exists
     this.migrateOldSchema();
+
+    // Add is_complete column if it doesn't exist
+    this.migrateAddIsComplete();
+  }
+
+  private migrateAddIsComplete(): void {
+    // Check if column exists
+    const columns = this.db.prepare(`PRAGMA table_info(mentions)`).all() as Array<{ name: string }>;
+    const hasIsComplete = columns.some(col => col.name === 'is_complete');
+
+    if (!hasIsComplete) {
+      console.log('Adding is_complete column to mentions table...');
+      // Add column with default 0 (incomplete)
+      this.db.exec(`ALTER TABLE mentions ADD COLUMN is_complete INTEGER DEFAULT 0`);
+
+      // Mark existing complete results
+      this.db.exec(`
+        UPDATE mentions
+        SET is_complete = 1
+        WHERE result IN ('found', 'not_found', 'user_not_found')
+      `);
+      console.log('Migration complete: is_complete column added and existing data updated');
+    }
   }
 
   private migrateOldSchema(): void {
@@ -102,14 +129,18 @@ export class MentionsDB {
     extractedTitle?: string;
     result: string;
     redditUrl?: string;
+    isComplete?: boolean;
   }): void {
+    // Determine if complete based on result if not explicitly set
+    const isComplete = data.isComplete ?? COMPLETE_RESULTS.includes(data.result);
+
     const stmt = this.db.prepare(`
       INSERT OR REPLACE INTO mentions (
         mention_id, author_username, author_id, mention_text,
         parent_tweet_id, parent_author, parent_text, image_url,
         extracted_subreddit, extracted_username, extracted_title,
-        processed_at, result, reddit_url
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        processed_at, result, reddit_url, is_complete
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
       data.mentionId,
@@ -125,21 +156,23 @@ export class MentionsDB {
       data.extractedTitle || null,
       new Date().toISOString(),
       data.result,
-      data.redditUrl || null
+      data.redditUrl || null,
+      isComplete ? 1 : 0
     );
   }
 
   // Legacy method for compatibility
   markProcessed(mentionId: string, result: string, redditUrl?: string): void {
+    const isComplete = COMPLETE_RESULTS.includes(result) ? 1 : 0;
     // Check if mention already exists
     const existing = this.db.prepare('SELECT 1 FROM mentions WHERE mention_id = ?').get(mentionId);
     if (existing) {
       // Update existing record
       const stmt = this.db.prepare(`
-        UPDATE mentions SET result = ?, reddit_url = ?, processed_at = ?
+        UPDATE mentions SET result = ?, reddit_url = ?, processed_at = ?, is_complete = ?
         WHERE mention_id = ?
       `);
-      stmt.run(result, redditUrl || null, new Date().toISOString(), mentionId);
+      stmt.run(result, redditUrl || null, new Date().toISOString(), isComplete, mentionId);
     } else {
       // Insert minimal record
       this.saveMention({

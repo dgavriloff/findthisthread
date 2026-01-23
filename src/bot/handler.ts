@@ -237,14 +237,58 @@ export class BotHandler {
       return { success: false, message: 'Mention not found in database' };
     }
 
-    if (!existingMention.image_url) {
-      return { success: false, message: 'No image URL stored for this mention' };
-    }
+    // Track data - start with existing, may be updated if we re-fetch
+    let parentTweetId = existingMention.parent_tweet_id || undefined;
+    let parentAuthor = existingMention.parent_author || undefined;
+    let parentText = existingMention.parent_text || undefined;
+    let imageUrl = existingMention.image_url || undefined;
 
     try {
-      // Download the image again
-      console.log(`Downloading image from ${existingMention.image_url}`);
-      const imageBuffer = await this.twitter.downloadImage(existingMention.image_url);
+      // If we don't have an image URL, re-fetch from Twitter
+      if (!imageUrl) {
+        console.log('No image URL stored, re-fetching from Twitter...');
+
+        // Get the parent tweet using the mention ID
+        const parentTweet = await this.twitter.getParentTweet(mentionId);
+
+        if (!parentTweet) {
+          console.log('Still no parent tweet found');
+          this.db.saveMention({
+            mentionId,
+            authorUsername: existingMention.author_username,
+            authorId: existingMention.author_id,
+            mentionText: existingMention.mention_text || '',
+            result: 'no_parent',
+          });
+          return { success: false, message: 'Could not find parent tweet' };
+        }
+
+        parentTweetId = parentTweet.id;
+        parentAuthor = parentTweet.author_username;
+        parentText = parentTweet.text;
+
+        if (!parentTweet.media?.length) {
+          console.log('Parent tweet has no media');
+          this.db.saveMention({
+            mentionId,
+            authorUsername: existingMention.author_username,
+            authorId: existingMention.author_id,
+            mentionText: existingMention.mention_text || '',
+            parentTweetId,
+            parentAuthor,
+            parentText,
+            result: 'no_media',
+          });
+          return { success: false, message: 'Parent tweet has no image' };
+        }
+
+        imageUrl = parentTweet.media[0].media_url_https || parentTweet.media[0].url;
+        console.log(`Found image URL: ${imageUrl}`);
+      }
+
+      // Download the image
+      console.log(`Downloading image from ${imageUrl}`);
+      const imageBuffer = await this.twitter.downloadImage(imageUrl);
 
       // Extract Reddit info using vision
       console.log('Extracting Reddit info from image...');
@@ -252,6 +296,17 @@ export class BotHandler {
       console.log('Extracted info:', JSON.stringify(redditInfo, null, 2));
 
       if (!redditInfo.title && !redditInfo.username && !redditInfo.subreddit && !redditInfo.bodySnippet) {
+        this.db.saveMention({
+          mentionId,
+          authorUsername: existingMention.author_username,
+          authorId: existingMention.author_id,
+          mentionText: existingMention.mention_text || '',
+          parentTweetId,
+          parentAuthor,
+          parentText,
+          imageUrl,
+          result: 'insufficient_info',
+        });
         return { success: false, message: 'No searchable information extracted from image' };
       }
 
@@ -266,10 +321,10 @@ export class BotHandler {
           authorUsername: existingMention.author_username,
           authorId: existingMention.author_id,
           mentionText: existingMention.mention_text || '',
-          parentTweetId: existingMention.parent_tweet_id || undefined,
-          parentAuthor: existingMention.parent_author || undefined,
-          parentText: existingMention.parent_text || undefined,
-          imageUrl: existingMention.image_url || undefined,
+          parentTweetId,
+          parentAuthor,
+          parentText,
+          imageUrl,
           extractedSubreddit: redditInfo.subreddit || undefined,
           extractedUsername: redditInfo.username || undefined,
           extractedTitle: redditInfo.title || undefined,
@@ -283,10 +338,10 @@ export class BotHandler {
           authorUsername: existingMention.author_username,
           authorId: existingMention.author_id,
           mentionText: existingMention.mention_text || '',
-          parentTweetId: existingMention.parent_tweet_id || undefined,
-          parentAuthor: existingMention.parent_author || undefined,
-          parentText: existingMention.parent_text || undefined,
-          imageUrl: existingMention.image_url || undefined,
+          parentTweetId,
+          parentAuthor,
+          parentText,
+          imageUrl,
           extractedSubreddit: redditInfo.subreddit || undefined,
           extractedUsername: redditInfo.username || undefined,
           extractedTitle: redditInfo.title || undefined,
@@ -300,10 +355,10 @@ export class BotHandler {
           authorUsername: existingMention.author_username,
           authorId: existingMention.author_id,
           mentionText: existingMention.mention_text || '',
-          parentTweetId: existingMention.parent_tweet_id || undefined,
-          parentAuthor: existingMention.parent_author || undefined,
-          parentText: existingMention.parent_text || undefined,
-          imageUrl: existingMention.image_url || undefined,
+          parentTweetId,
+          parentAuthor,
+          parentText,
+          imageUrl,
           extractedSubreddit: redditInfo.subreddit || undefined,
           extractedUsername: redditInfo.username || undefined,
           extractedTitle: redditInfo.title || undefined,
@@ -318,10 +373,10 @@ export class BotHandler {
           authorUsername: existingMention.author_username,
           authorId: existingMention.author_id,
           mentionText: existingMention.mention_text || '',
-          parentTweetId: existingMention.parent_tweet_id || undefined,
-          parentAuthor: existingMention.parent_author || undefined,
-          parentText: existingMention.parent_text || undefined,
-          imageUrl: existingMention.image_url || undefined,
+          parentTweetId,
+          parentAuthor,
+          parentText,
+          imageUrl,
           extractedSubreddit: redditInfo.subreddit || undefined,
           extractedUsername: redditInfo.username || undefined,
           extractedTitle: redditInfo.title || undefined,

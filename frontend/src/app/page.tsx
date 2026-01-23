@@ -29,6 +29,7 @@ interface Mention {
   parent_author: string | null;
   parent_tweet_id: string | null;
   mention_text: string | null;
+  is_complete: number; // 0 = can retry, 1 = final result
 }
 
 type ConnectionStatus = "connecting" | "connected" | "disconnected";
@@ -287,7 +288,7 @@ export default function Dashboard() {
                     <div className="w-8 h-8 flex items-center justify-center">
                       <RefreshCw className="h-3.5 w-3.5 text-amber-500 animate-spin" />
                     </div>
-                  ) : (
+                  ) : !mention.is_complete ? (
                     <button
                       onClick={() => reprocessMention(mention.mention_id)}
                       disabled={reprocessingId !== null}
@@ -296,7 +297,7 @@ export default function Dashboard() {
                     >
                       <RotateCcw className="h-3.5 w-3.5 text-muted-foreground" />
                     </button>
-                  )}
+                  ) : null}
                 </div>
               </article>
             ))}
