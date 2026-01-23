@@ -169,6 +169,24 @@ export class BotHandler {
             result: 'rate_limited',
           });
         }
+      } else if (result?.error === 'api_error') {
+        console.log('Reddit API error - could not access user profile');
+        if (!this.testMode) {
+          this.db.saveMention({
+            mentionId: mention.id,
+            authorUsername: mention.author_username,
+            authorId: mention.author_id,
+            mentionText: mention.text,
+            parentTweetId,
+            parentAuthor,
+            parentText,
+            imageUrl,
+            extractedSubreddit,
+            extractedUsername,
+            extractedTitle,
+            result: 'api_error',
+          });
+        }
       } else if (result && !result.error) {
         console.log(`Found match: ${result.url} (confidence: ${result.matchConfidence})`);
         if (!this.testMode) {
@@ -348,6 +366,23 @@ export class BotHandler {
           result: 'rate_limited',
         });
         return { success: false, message: 'Reddit says try again later' };
+      } else if (result?.error === 'api_error') {
+        console.log('Reddit API error - could not access user profile');
+        this.db.saveMention({
+          mentionId,
+          authorUsername: existingMention.author_username,
+          authorId: existingMention.author_id,
+          mentionText: existingMention.mention_text || '',
+          parentTweetId,
+          parentAuthor,
+          parentText,
+          imageUrl,
+          extractedSubreddit: redditInfo.subreddit || undefined,
+          extractedUsername: redditInfo.username || undefined,
+          extractedTitle: redditInfo.title || undefined,
+          result: 'api_error',
+        });
+        return { success: false, message: 'Reddit API error - try again later' };
       } else if (result && !result.error) {
         console.log(`Found match: ${result.url} (confidence: ${result.matchConfidence})`);
         this.db.saveMention({

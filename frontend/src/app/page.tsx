@@ -235,6 +235,11 @@ export default function Dashboard() {
                           <RotateCcw className="h-3 w-3" />
                           reddit says try later
                         </span>
+                      ) : mention.result === "api_error" ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-500">
+                          <RotateCcw className="h-3 w-3" />
+                          reddit error - try later
+                        </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-[10px] font-medium text-red-500">
                           <X className="h-3 w-3" />

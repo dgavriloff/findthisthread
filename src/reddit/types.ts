@@ -5,7 +5,7 @@ export interface RedditSearchResult {
   subreddit: string;
   matchConfidence: number;
   isComment?: boolean;
-  error?: 'user_not_found' | 'rate_limited';
+  error?: 'user_not_found' | 'rate_limited' | 'api_error';
 }
 
 export interface RedditPost {

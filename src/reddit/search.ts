@@ -147,6 +147,11 @@ export class RedditSearch {
     return this.lastFetchStatus === 404;
   }
 
+  // Check if last fetch was a 403 (forbidden - private profile or shadowbanned)
+  wasForbidden(): boolean {
+    return this.lastFetchStatus === 403;
+  }
+
   // Check if we're currently rate limited
   isRateLimited(): boolean {
     return Date.now() < this.rateLimitedUntil;
@@ -177,9 +182,13 @@ export class RedditSearch {
 
       const result = await fn();
 
-      // If we got a user_not_found error, return it immediately
+      // If we got a user_not_found or api_error, return it immediately
       if (result?.error === 'user_not_found') {
         console.log(`Strategy '${name}' found user does not exist`);
+        return result;
+      }
+      if (result?.error === 'api_error') {
+        console.log(`Strategy '${name}' hit API error (forbidden/private)`);
         return result;
       }
 
@@ -418,6 +427,7 @@ export class RedditSearch {
     let after: string | null = null;
     const maxPages = 5;
     let userNotFound = false;
+    let apiForbidden = false;
 
     for (let page = 0; page < maxPages; page++) {
       // Check rate limit before each page
@@ -433,6 +443,13 @@ export class RedditSearch {
       if (!response && this.wasNotFound()) {
         console.log(`User u/${info.username} not found (deleted or suspended)`);
         userNotFound = true;
+        break;
+      }
+
+      // Check if forbidden (403) - private profile or shadowbanned
+      if (!response && this.wasForbidden()) {
+        console.log(`User u/${info.username} profile is private or inaccessible (403)`);
+        apiForbidden = true;
         break;
       }
 
@@ -453,6 +470,18 @@ export class RedditSearch {
         subreddit: '',
         matchConfidence: 0,
         error: 'user_not_found',
+      };
+    }
+
+    // Return special error result if API forbidden (private profile, etc.)
+    if (apiForbidden) {
+      return {
+        url: '',
+        title: '',
+        author: info.username,
+        subreddit: '',
+        matchConfidence: 0,
+        error: 'api_error',
       };
     }
 
