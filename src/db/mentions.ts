@@ -21,7 +21,8 @@ export interface MentionRecord {
 }
 
 // Results that are considered complete (final, no retry needed)
-export const COMPLETE_RESULTS = ['found', 'not_found', 'user_not_found', 'no_parent', 'no_media'];
+// not_found is NOT complete - Reddit search can be flaky, user may want to retry
+export const COMPLETE_RESULTS = ['found', 'user_not_found', 'no_parent', 'no_media'];
 
 export class MentionsDB {
   private db: Database;
@@ -68,6 +69,23 @@ export class MentionsDB {
 
     // Add is_complete column if it doesn't exist
     this.migrateAddIsComplete();
+
+    // Make not_found retriable (one-time migration)
+    this.migrateNotFoundRetriable();
+  }
+
+  private migrateNotFoundRetriable(): void {
+    // Mark not_found as incomplete so users can retry
+    // This is idempotent - safe to run multiple times
+    const result = this.db.prepare(`
+      UPDATE mentions
+      SET is_complete = 0
+      WHERE result = 'not_found' AND is_complete = 1
+    `).run();
+
+    if (result.changes > 0) {
+      console.log(`Made ${result.changes} not_found records retriable`);
+    }
   }
 
   private migrateAddIsComplete(): void {
@@ -84,7 +102,7 @@ export class MentionsDB {
       this.db.exec(`
         UPDATE mentions
         SET is_complete = 1
-        WHERE result IN ('found', 'not_found', 'user_not_found', 'no_parent', 'no_media')
+        WHERE result IN ('found', 'user_not_found', 'no_parent', 'no_media')
       `);
       console.log('Migration complete: is_complete column added and existing data updated');
     }
