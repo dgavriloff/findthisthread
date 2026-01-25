@@ -3,6 +3,7 @@ import { VisionExtractor } from './vision/extractor';
 import { RedditSearch } from './reddit/search';
 import { MentionsDB } from './db/mentions';
 import { BotHandler } from './bot/handler';
+import { TelegramClient } from './telegram/client';
 import { createServer, BotState } from './web/server';
 import type { ServerWebSocket } from 'bun';
 
@@ -14,6 +15,9 @@ const TWITTER_BOT_PASSWORD = process.env.TWITTER_BOT_PASSWORD;
 const TWITTER_PROXY = process.env.TWITTER_PROXY;
 const TWITTER_TOTP_SECRET = process.env.TWITTER_TOTP_SECRET;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+const TELEGRAM_TIMEOUT_MS = parseInt(process.env.TELEGRAM_TIMEOUT_MS || '60000', 10);
 const DATABASE_PATH = process.env.DATABASE_PATH || (process.env.RAILWAY_ENVIRONMENT ? '/data/mentions.db' : './data/mentions.db');
 const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || '300000', 10);
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -77,7 +81,17 @@ async function main(): Promise<void> {
   const vision = new VisionExtractor(GEMINI_API_KEY!);
   const reddit = new RedditSearch();
   const db = new MentionsDB(DATABASE_PATH);
-  const handler = new BotHandler(twitter, vision, reddit, db, TEST_MODE);
+
+  // Initialize Telegram for reply approval (optional)
+  let telegram: TelegramClient | null = null;
+  if (TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID) {
+    telegram = new TelegramClient(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_TIMEOUT_MS);
+    console.log('Telegram approval configured - replies will require approval');
+  } else {
+    console.log('Telegram not configured - replies will be sent automatically');
+  }
+
+  const handler = new BotHandler(twitter, vision, reddit, db, TEST_MODE, telegram);
 
   // Set up Twitter credentials for posting replies
   if (TWITTER_BOT_EMAIL && TWITTER_BOT_PASSWORD && TWITTER_PROXY) {
@@ -90,9 +104,9 @@ async function main(): Promise<void> {
       console.log('Successfully logged in to Twitter for posting replies');
 
       // Retry any pending replies from previous runs
-      const { sent, failed } = await handler.retryPendingReplies();
-      if (sent > 0 || failed > 0) {
-        console.log(`Retried pending replies: ${sent} sent, ${failed} failed`);
+      const { sent, failed, skipped } = await handler.retryPendingReplies();
+      if (sent > 0 || failed > 0 || skipped > 0) {
+        console.log(`Retried pending replies: ${sent} sent, ${failed} failed, ${skipped} skipped`);
       }
     } else {
       console.log('WARNING: Could not login to Twitter - replies will not be sent');

@@ -2,6 +2,7 @@ import { TwitterClient } from '../twitter/client';
 import { VisionExtractor } from '../vision/extractor';
 import { RedditSearch } from '../reddit/search';
 import { MentionsDB } from '../db/mentions';
+import { TelegramClient } from '../telegram/client';
 import { Mention } from '../twitter/types';
 
 export class BotHandler {
@@ -9,6 +10,7 @@ export class BotHandler {
   private vision: VisionExtractor;
   private reddit: RedditSearch;
   private db: MentionsDB;
+  private telegram: TelegramClient | null;
   private testMode: boolean;
 
   constructor(
@@ -16,12 +18,14 @@ export class BotHandler {
     vision: VisionExtractor,
     reddit: RedditSearch,
     db: MentionsDB,
-    testMode = false
+    testMode = false,
+    telegram: TelegramClient | null = null
   ) {
     this.twitter = twitter;
     this.vision = vision;
     this.reddit = reddit;
     this.db = db;
+    this.telegram = telegram;
     this.testMode = testMode;
   }
 
@@ -195,8 +199,16 @@ export class BotHandler {
         let replySentAt: string | undefined;
 
         if (!this.testMode) {
-          const replyResult = await this.sendReplyToMention(mention.id, result.url, mention.author_username);
-          if (replyResult.success && replyResult.tweetId) {
+          const replyResult = await this.sendReplyToMention(
+            mention.id,
+            result.url,
+            mention.author_username,
+            extractedTitle,
+            extractedSubreddit
+          );
+          if (replyResult.skipped) {
+            console.log('Reply skipped by user');
+          } else if (replyResult.success && replyResult.tweetId) {
             replyTweetId = replyResult.tweetId;
             replySentAt = new Date().toISOString();
             console.log(`Reply sent! Tweet ID: ${replyTweetId}`);
@@ -574,19 +586,49 @@ export class BotHandler {
   private async sendReplyToMention(
     mentionId: string,
     redditUrl: string,
-    authorUsername: string
-  ): Promise<{ success: boolean; tweetId?: string; error?: string }> {
-    // Compose the reply message
-    const replyText = `@${authorUsername} Found it! ${redditUrl}`;
+    authorUsername: string,
+    extractedTitle?: string,
+    extractedSubreddit?: string
+  ): Promise<{ success: boolean; tweetId?: string; error?: string; skipped?: boolean }> {
+    const defaultReply = `@${authorUsername} Found it! ${redditUrl}`;
+    let replyText = defaultReply;
+
+    // If Telegram is configured, request approval
+    if (this.telegram) {
+      try {
+        const tweetUrl = `https://x.com/i/status/${mentionId}`;
+        const approval = await this.telegram.requestApproval({
+          mentionAuthor: authorUsername,
+          redditUrl,
+          extractedTitle,
+          extractedSubreddit,
+          tweetUrl,
+        });
+
+        if (!approval.approved) {
+          console.log(`Reply skipped by user for ${mentionId}`);
+          return { success: false, skipped: true };
+        }
+
+        if (approval.customText) {
+          replyText = approval.customText;
+        }
+      } catch (error) {
+        console.error('Telegram approval error:', error);
+        // Fall back to default reply on Telegram error
+        console.log('Falling back to default reply');
+      }
+    }
 
     // Send the reply
     return this.twitter.sendReply(mentionId, replyText);
   }
 
-  async retryPendingReplies(): Promise<{ sent: number; failed: number }> {
+  async retryPendingReplies(): Promise<{ sent: number; failed: number; skipped: number }> {
     const pendingMentions = this.db.getMentionsNeedingReply(10);
     let sent = 0;
     let failed = 0;
+    let skipped = 0;
 
     for (const mention of pendingMentions) {
       if (!mention.reddit_url) continue;
@@ -595,10 +637,17 @@ export class BotHandler {
       const result = await this.sendReplyToMention(
         mention.mention_id,
         mention.reddit_url,
-        mention.author_username
+        mention.author_username,
+        mention.extracted_title || undefined,
+        mention.extracted_subreddit || undefined
       );
 
-      if (result.success && result.tweetId) {
+      if (result.skipped) {
+        skipped++;
+        // Mark as skipped by setting a special reply_tweet_id
+        this.db.updateReplyStatus(mention.mention_id, 'skipped');
+        console.log(`Reply skipped for ${mention.mention_id}`);
+      } else if (result.success && result.tweetId) {
         this.db.updateReplyStatus(mention.mention_id, result.tweetId);
         sent++;
         console.log(`Reply sent for ${mention.mention_id}`);
@@ -611,6 +660,6 @@ export class BotHandler {
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
 
-    return { sent, failed };
+    return { sent, failed, skipped };
   }
 }
