@@ -9,6 +9,10 @@ import type { ServerWebSocket } from 'bun';
 // Load environment variables
 const TWITTER_API_KEY = process.env.TWITTER_API_KEY;
 const TWITTER_BOT_USERNAME = process.env.TWITTER_BOT_USERNAME || 'findthisthread';
+const TWITTER_BOT_EMAIL = process.env.TWITTER_BOT_EMAIL;
+const TWITTER_BOT_PASSWORD = process.env.TWITTER_BOT_PASSWORD;
+const TWITTER_PROXY = process.env.TWITTER_PROXY;
+const TWITTER_TOTP_SECRET = process.env.TWITTER_TOTP_SECRET;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const DATABASE_PATH = process.env.DATABASE_PATH || (process.env.RAILWAY_ENVIRONMENT ? '/data/mentions.db' : './data/mentions.db');
 const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || '300000', 10);
@@ -74,6 +78,29 @@ async function main(): Promise<void> {
   const reddit = new RedditSearch();
   const db = new MentionsDB(DATABASE_PATH);
   const handler = new BotHandler(twitter, vision, reddit, db, TEST_MODE);
+
+  // Set up Twitter credentials for posting replies
+  if (TWITTER_BOT_EMAIL && TWITTER_BOT_PASSWORD && TWITTER_PROXY) {
+    twitter.setCredentials(TWITTER_BOT_EMAIL, TWITTER_BOT_PASSWORD, TWITTER_PROXY, TWITTER_TOTP_SECRET);
+    console.log('Twitter posting credentials configured');
+
+    // Attempt login (will retry later if fails)
+    const loggedIn = await twitter.login();
+    if (loggedIn) {
+      console.log('Successfully logged in to Twitter for posting replies');
+
+      // Retry any pending replies from previous runs
+      const { sent, failed } = await handler.retryPendingReplies();
+      if (sent > 0 || failed > 0) {
+        console.log(`Retried pending replies: ${sent} sent, ${failed} failed`);
+      }
+    } else {
+      console.log('WARNING: Could not login to Twitter - replies will not be sent');
+    }
+  } else {
+    console.log('WARNING: Twitter posting credentials not configured - replies will not be sent');
+    console.log('  Set TWITTER_BOT_EMAIL, TWITTER_BOT_PASSWORD, and TWITTER_PROXY to enable replies');
+  }
 
   // Create Hono app for REST endpoints
   const app = createServer(db, () => botState, triggerRefresh, (mentionId) => handler.reprocessMention(mentionId));

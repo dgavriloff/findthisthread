@@ -18,6 +18,8 @@ export interface MentionRecord {
   result: string;
   reddit_url: string | null;
   is_complete: number; // 0 = incomplete (can retry), 1 = complete (final result)
+  reply_tweet_id: string | null;
+  reply_sent_at: string | null;
 }
 
 // Results that are considered complete (final, no retry needed)
@@ -72,6 +74,9 @@ export class MentionsDB {
 
     // Make not_found retriable (one-time migration)
     this.migrateNotFoundRetriable();
+
+    // Add reply tracking columns
+    this.migrateAddReplyColumns();
   }
 
   private migrateNotFoundRetriable(): void {
@@ -85,6 +90,18 @@ export class MentionsDB {
 
     if (result.changes > 0) {
       console.log(`Made ${result.changes} not_found records retriable`);
+    }
+  }
+
+  private migrateAddReplyColumns(): void {
+    const columns = this.db.prepare(`PRAGMA table_info(mentions)`).all() as Array<{ name: string }>;
+    const hasReplyTweetId = columns.some(col => col.name === 'reply_tweet_id');
+
+    if (!hasReplyTweetId) {
+      console.log('Adding reply tracking columns to mentions table...');
+      this.db.exec(`ALTER TABLE mentions ADD COLUMN reply_tweet_id TEXT`);
+      this.db.exec(`ALTER TABLE mentions ADD COLUMN reply_sent_at TEXT`);
+      console.log('Migration complete: reply columns added');
     }
   }
 
@@ -148,6 +165,8 @@ export class MentionsDB {
     result: string;
     redditUrl?: string;
     isComplete?: boolean;
+    replyTweetId?: string;
+    replySentAt?: string;
   }): void {
     // Determine if complete based on result if not explicitly set
     const isComplete = data.isComplete ?? COMPLETE_RESULTS.includes(data.result);
@@ -157,8 +176,8 @@ export class MentionsDB {
         mention_id, author_username, author_id, mention_text,
         parent_tweet_id, parent_author, parent_text, image_url,
         extracted_subreddit, extracted_username, extracted_title,
-        processed_at, result, reddit_url, is_complete
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        processed_at, result, reddit_url, is_complete, reply_tweet_id, reply_sent_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
       data.mentionId,
@@ -175,8 +194,32 @@ export class MentionsDB {
       new Date().toISOString(),
       data.result,
       data.redditUrl || null,
-      isComplete ? 1 : 0
+      isComplete ? 1 : 0,
+      data.replyTweetId || null,
+      data.replySentAt || null
     );
+  }
+
+  updateReplyStatus(mentionId: string, replyTweetId: string): void {
+    const stmt = this.db.prepare(`
+      UPDATE mentions
+      SET reply_tweet_id = ?, reply_sent_at = ?
+      WHERE mention_id = ?
+    `);
+    stmt.run(replyTweetId, new Date().toISOString(), mentionId);
+  }
+
+  getMentionsNeedingReply(limit: number = 10): MentionRecord[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM mentions
+      WHERE result = 'found'
+        AND reddit_url IS NOT NULL
+        AND reply_tweet_id IS NULL
+        AND mention_id NOT LIKE 'upload_%'
+      ORDER BY processed_at ASC
+      LIMIT ?
+    `);
+    return stmt.all(limit) as MentionRecord[];
   }
 
   // Legacy method for compatibility

@@ -7,11 +7,120 @@ export class TwitterClient {
   private apiKey: string;
   private botUsername: string;
   private mockMode: boolean;
+  private loginCookie: string | null = null;
+  private email: string | null = null;
+  private password: string | null = null;
+  private proxy: string | null = null;
+  private totpSecret: string | null = null;
 
   constructor(apiKey: string, botUsername: string, mockMode = false) {
     this.apiKey = apiKey;
     this.botUsername = botUsername;
     this.mockMode = mockMode;
+  }
+
+  setCredentials(email: string, password: string, proxy: string, totpSecret?: string): void {
+    this.email = email;
+    this.password = password;
+    this.proxy = proxy;
+    this.totpSecret = totpSecret || null;
+  }
+
+  async login(): Promise<boolean> {
+    if (this.mockMode) {
+      console.log('[Mock] Simulating login');
+      this.loginCookie = 'mock_cookie';
+      return true;
+    }
+
+    if (!this.email || !this.password || !this.proxy) {
+      console.error('Cannot login: missing email, password, or proxy');
+      return false;
+    }
+
+    try {
+      console.log(`Logging in as @${this.botUsername}...`);
+      const response = await this.request<{
+        status: string;
+        login_cookie?: string;
+        login_cookies?: string;
+        msg?: string;
+      }>('/twitter/user_login_v2', {
+        method: 'POST',
+        body: JSON.stringify({
+          user_name: this.botUsername,
+          email: this.email,
+          password: this.password,
+          proxy: this.proxy,
+          ...(this.totpSecret && { totp_secret: this.totpSecret }),
+        }),
+      });
+
+      // Try both possible cookie field names (API may use either)
+      const cookie = response.login_cookie || response.login_cookies;
+      if (cookie) {
+        this.loginCookie = cookie;
+        console.log('Login successful!');
+        return true;
+      } else {
+        console.error('Login failed:', response.msg || 'No cookie returned');
+        return false;
+      }
+    } catch (error) {
+      console.error('Login error:', error);
+      return false;
+    }
+  }
+
+  isLoggedIn(): boolean {
+    return this.loginCookie !== null;
+  }
+
+  async sendReply(replyToTweetId: string, text: string): Promise<{ success: boolean; tweetId?: string; error?: string }> {
+    if (this.mockMode) {
+      console.log(`[Mock] Would reply to ${replyToTweetId}: ${text}`);
+      return { success: true, tweetId: 'mock_tweet_id' };
+    }
+
+    if (!this.loginCookie) {
+      // Try to login first
+      const loggedIn = await this.login();
+      if (!loggedIn) {
+        return { success: false, error: 'Not logged in and login failed' };
+      }
+    }
+
+    try {
+      console.log(`Sending reply to tweet ${replyToTweetId}...`);
+      const response = await this.request<{
+        status: string;
+        tweet_id?: string;
+        msg?: string;
+      }>('/twitter/create_tweet_v2', {
+        method: 'POST',
+        body: JSON.stringify({
+          login_cookies: this.loginCookie,
+          tweet_text: text,
+          reply_to_tweet_id: replyToTweetId,
+          proxy: this.proxy,
+        }),
+      });
+
+      if (response.status === 'success' && response.tweet_id) {
+        console.log(`Reply sent! Tweet ID: ${response.tweet_id}`);
+        return { success: true, tweetId: response.tweet_id };
+      } else {
+        console.error('Reply failed:', response.msg || 'Unknown error');
+        // If auth error, clear cookie so we re-login next time
+        if (response.msg?.toLowerCase().includes('auth') || response.msg?.toLowerCase().includes('login')) {
+          this.loginCookie = null;
+        }
+        return { success: false, error: response.msg || 'Failed to send reply' };
+      }
+    } catch (error) {
+      console.error('Error sending reply:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
   }
 
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {

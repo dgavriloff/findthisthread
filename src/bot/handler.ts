@@ -189,6 +189,22 @@ export class BotHandler {
         }
       } else if (result && !result.error) {
         console.log(`Found match: ${result.url} (confidence: ${result.matchConfidence})`);
+
+        // Try to send a reply
+        let replyTweetId: string | undefined;
+        let replySentAt: string | undefined;
+
+        if (!this.testMode) {
+          const replyResult = await this.sendReplyToMention(mention.id, result.url, mention.author_username);
+          if (replyResult.success && replyResult.tweetId) {
+            replyTweetId = replyResult.tweetId;
+            replySentAt = new Date().toISOString();
+            console.log(`Reply sent! Tweet ID: ${replyTweetId}`);
+          } else {
+            console.log(`Failed to send reply: ${replyResult.error}`);
+          }
+        }
+
         if (!this.testMode) {
           this.db.saveMention({
             mentionId: mention.id,
@@ -204,6 +220,8 @@ export class BotHandler {
             extractedTitle,
             result: 'found',
             redditUrl: result.url,
+            replyTweetId,
+            replySentAt,
           });
         }
       } else {
@@ -551,5 +569,48 @@ export class BotHandler {
       console.error(`Error reprocessing mention ${mentionId}:`, error);
       return { success: false, message: `Error: ${error instanceof Error ? error.message : 'Unknown error'}` };
     }
+  }
+
+  private async sendReplyToMention(
+    mentionId: string,
+    redditUrl: string,
+    authorUsername: string
+  ): Promise<{ success: boolean; tweetId?: string; error?: string }> {
+    // Compose the reply message
+    const replyText = `@${authorUsername} Found it! ${redditUrl}`;
+
+    // Send the reply
+    return this.twitter.sendReply(mentionId, replyText);
+  }
+
+  async retryPendingReplies(): Promise<{ sent: number; failed: number }> {
+    const pendingMentions = this.db.getMentionsNeedingReply(10);
+    let sent = 0;
+    let failed = 0;
+
+    for (const mention of pendingMentions) {
+      if (!mention.reddit_url) continue;
+
+      console.log(`Retrying reply for mention ${mention.mention_id}...`);
+      const result = await this.sendReplyToMention(
+        mention.mention_id,
+        mention.reddit_url,
+        mention.author_username
+      );
+
+      if (result.success && result.tweetId) {
+        this.db.updateReplyStatus(mention.mention_id, result.tweetId);
+        sent++;
+        console.log(`Reply sent for ${mention.mention_id}`);
+      } else {
+        failed++;
+        console.log(`Failed to send reply for ${mention.mention_id}: ${result.error}`);
+      }
+
+      // Small delay between replies to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+
+    return { sent, failed };
   }
 }
