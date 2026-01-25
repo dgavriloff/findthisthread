@@ -388,7 +388,7 @@ export default function Dashboard() {
                 </div>
 
                 {/* Action */}
-                <div className="flex-shrink-0">
+                <div className="flex-shrink-0 self-start">
                   {mention.reddit_url ? (
                     <div className="flex flex-col items-end gap-0.5">
                       <a
