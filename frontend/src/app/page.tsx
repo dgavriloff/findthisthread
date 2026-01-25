@@ -388,9 +388,9 @@ export default function Dashboard() {
                 </div>
 
                 {/* Action */}
-                <div className="flex-shrink-0 flex flex-col items-end gap-1">
+                <div className="flex-shrink-0">
                   {mention.reddit_url ? (
-                    <>
+                    <div className="flex flex-col items-end gap-0.5">
                       <a
                         href={mention.reddit_url}
                         target="_blank"
@@ -414,13 +414,13 @@ export default function Dashboard() {
                           find again
                         </button>
                       )}
-                    </>
+                    </div>
                   ) : mention.result === "processing" || reprocessingId === mention.mention_id ? (
                     <div className="w-8 h-8 flex items-center justify-center">
                       <RefreshCw className="h-3.5 w-3.5 text-amber-500 animate-spin" />
                     </div>
                   ) : !mention.is_complete ? (
-                    <>
+                    <div className="flex items-center gap-1">
                       <button
                         onClick={() => reprocessMention(mention.mention_id)}
                         disabled={reprocessingId !== null}
@@ -438,7 +438,7 @@ export default function Dashboard() {
                           <Trash2 className="h-3.5 w-3.5 text-red-500" />
                         </button>
                       )}
-                    </>
+                    </div>
                   ) : (mention.result === "no_parent" || mention.result === "no_media") ? (
                     <button
                       onClick={() => setDeleteConfirmId(mention.mention_id)}
