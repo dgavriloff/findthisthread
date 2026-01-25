@@ -97,6 +97,10 @@ export class TwitterClient {
 
     // Filter to only new mentions if sinceId provided
     if (sinceId) {
+      console.log(`Filtering with sinceId: ${sinceId}`);
+      if (mentions.length > 0) {
+        console.log(`Newest mention ID: ${mentions[0].id}, comparison: ${mentions[0].id} > ${sinceId} = ${mentions[0].id > sinceId}`);
+      }
       mentions = mentions.filter(m => m.id > sinceId);
     }
 

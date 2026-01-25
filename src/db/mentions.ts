@@ -205,9 +205,13 @@ export class MentionsDB {
   }
 
   getLastMentionId(): string | undefined {
+    // Only consider real Twitter IDs (numeric), not upload IDs
+    // This prevents upload IDs like "upload_xxx" from breaking the sinceId filter
+    // since string comparison would filter out all tweets (digits < 'u' in ASCII)
     const stmt = this.db.prepare(`
       SELECT mention_id FROM mentions
-      ORDER BY processed_at DESC
+      WHERE mention_id NOT LIKE 'upload_%'
+      ORDER BY mention_id DESC
       LIMIT 1
     `);
     const result = stmt.get() as { mention_id: string } | null;
