@@ -349,31 +349,39 @@ export default function Dashboard() {
 
                     {/* Users */}
                     <div className="text-xs space-y-0.5">
-                      {mention.parent_author && mention.parent_author !== "unknown" && mention.parent_tweet_id && (
-                        <div className="truncate">
-                          <span className="text-muted-foreground">posted by </span>
-                          <a
-                            href={`https://x.com/${mention.parent_author}/status/${mention.parent_tweet_id}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="font-medium hover:underline"
-                          >
-                            @{mention.parent_author}
-                          </a>
+                      {mention.author_username === "upload" ? (
+                        <div className="truncate text-muted-foreground">
+                          manual upload
                         </div>
-                      )}
-                      {mention.author_username && mention.author_username !== "unknown" && (
-                        <div className="truncate">
-                          <span className="text-muted-foreground">requested by </span>
-                          <a
-                            href={`https://x.com/${mention.author_username}/status/${mention.mention_id}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="font-medium hover:underline"
-                          >
-                            @{mention.author_username}
-                          </a>
-                        </div>
+                      ) : (
+                        <>
+                          {mention.parent_author && mention.parent_author !== "unknown" && mention.parent_tweet_id && (
+                            <div className="truncate">
+                              <span className="text-muted-foreground">posted by </span>
+                              <a
+                                href={`https://x.com/${mention.parent_author}/status/${mention.parent_tweet_id}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="font-medium hover:underline"
+                              >
+                                @{mention.parent_author}
+                              </a>
+                            </div>
+                          )}
+                          {mention.author_username && mention.author_username !== "unknown" && (
+                            <div className="truncate">
+                              <span className="text-muted-foreground">requested by </span>
+                              <a
+                                href={`https://x.com/${mention.author_username}/status/${mention.mention_id}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="font-medium hover:underline"
+                              >
+                                @{mention.author_username}
+                              </a>
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
 

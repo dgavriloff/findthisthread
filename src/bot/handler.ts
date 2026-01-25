@@ -251,12 +251,17 @@ export class BotHandler {
     const mentionId = `upload_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     console.log(`Processing uploaded image ${mentionId}...`);
 
+    // Convert image to data URL for storage
+    const base64Image = imageBuffer.toString('base64');
+    const imageUrl = `data:image/png;base64,${base64Image}`;
+
     // Save immediately with "processing" status
     this.db.saveMention({
       mentionId,
       authorUsername: 'upload',
       authorId: 'upload',
       mentionText: 'Manual upload',
+      imageUrl,
       result: 'processing',
     });
 
@@ -273,6 +278,7 @@ export class BotHandler {
           authorUsername: 'upload',
           authorId: 'upload',
           mentionText: 'Manual upload',
+          imageUrl,
           result: 'insufficient_info',
         });
         return { success: false, message: 'No searchable information found in image', mentionId };
@@ -289,6 +295,7 @@ export class BotHandler {
           authorUsername: 'upload',
           authorId: 'upload',
           mentionText: 'Manual upload',
+          imageUrl,
           extractedSubreddit: redditInfo.subreddit || undefined,
           extractedUsername: redditInfo.username || undefined,
           extractedTitle: redditInfo.title || undefined,
@@ -302,6 +309,7 @@ export class BotHandler {
           authorUsername: 'upload',
           authorId: 'upload',
           mentionText: 'Manual upload',
+          imageUrl,
           extractedSubreddit: redditInfo.subreddit || undefined,
           extractedUsername: redditInfo.username || undefined,
           extractedTitle: redditInfo.title || undefined,
@@ -315,6 +323,7 @@ export class BotHandler {
           authorUsername: 'upload',
           authorId: 'upload',
           mentionText: 'Manual upload',
+          imageUrl,
           extractedSubreddit: redditInfo.subreddit || undefined,
           extractedUsername: redditInfo.username || undefined,
           extractedTitle: redditInfo.title || undefined,
@@ -328,6 +337,7 @@ export class BotHandler {
           authorUsername: 'upload',
           authorId: 'upload',
           mentionText: 'Manual upload',
+          imageUrl,
           extractedSubreddit: redditInfo.subreddit || undefined,
           extractedUsername: redditInfo.username || undefined,
           extractedTitle: redditInfo.title || undefined,
@@ -342,6 +352,7 @@ export class BotHandler {
           authorUsername: 'upload',
           authorId: 'upload',
           mentionText: 'Manual upload',
+          imageUrl,
           extractedSubreddit: redditInfo.subreddit || undefined,
           extractedUsername: redditInfo.username || undefined,
           extractedTitle: redditInfo.title || undefined,
@@ -356,6 +367,7 @@ export class BotHandler {
         authorUsername: 'upload',
         authorId: 'upload',
         mentionText: 'Manual upload',
+        imageUrl,
         result: 'error',
       });
       return { success: false, message: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`, mentionId };
