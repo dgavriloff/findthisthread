@@ -388,9 +388,9 @@ export default function Dashboard() {
                 </div>
 
                 {/* Action */}
-                <div className="flex-shrink-0 self-center">
+                <div className="flex-shrink-0 self-center mt-2">
                   {mention.reddit_url ? (
-                    <div className="flex flex-col items-end gap-0.5">
+                    <div className="flex flex-col items-center gap-0.5">
                       <a
                         href={mention.reddit_url}
                         target="_blank"
