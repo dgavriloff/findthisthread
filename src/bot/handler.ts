@@ -246,6 +246,122 @@ export class BotHandler {
     }
   }
 
+  async handleUpload(imageBuffer: Buffer): Promise<{ success: boolean; message: string; url?: string; mentionId: string }> {
+    // Generate a unique ID for this upload
+    const mentionId = `upload_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    console.log(`Processing uploaded image ${mentionId}...`);
+
+    // Save immediately with "processing" status
+    this.db.saveMention({
+      mentionId,
+      authorUsername: 'upload',
+      authorId: 'upload',
+      mentionText: 'Manual upload',
+      result: 'processing',
+    });
+
+    try {
+      // Extract Reddit info using vision
+      console.log('Extracting Reddit info from uploaded image...');
+      const redditInfo = await this.vision.extractRedditInfo(imageBuffer);
+      console.log('Extracted info:', JSON.stringify(redditInfo, null, 2));
+
+      if (!redditInfo.title && !redditInfo.username && !redditInfo.subreddit) {
+        console.log('No searchable information extracted from image');
+        this.db.saveMention({
+          mentionId,
+          authorUsername: 'upload',
+          authorId: 'upload',
+          mentionText: 'Manual upload',
+          result: 'insufficient_info',
+        });
+        return { success: false, message: 'No searchable information found in image', mentionId };
+      }
+
+      // Search Reddit
+      console.log('Searching Reddit for matching post...');
+      const result = await this.reddit.findRedditPost(redditInfo);
+
+      if (result?.error === 'user_not_found') {
+        console.log(`Reddit user not found (deleted or suspended)`);
+        this.db.saveMention({
+          mentionId,
+          authorUsername: 'upload',
+          authorId: 'upload',
+          mentionText: 'Manual upload',
+          extractedSubreddit: redditInfo.subreddit || undefined,
+          extractedUsername: redditInfo.username || undefined,
+          extractedTitle: redditInfo.title || undefined,
+          result: 'user_not_found',
+        });
+        return { success: false, message: 'Reddit user not found', mentionId };
+      } else if (result?.error === 'rate_limited') {
+        console.log('Reddit rate limited');
+        this.db.saveMention({
+          mentionId,
+          authorUsername: 'upload',
+          authorId: 'upload',
+          mentionText: 'Manual upload',
+          extractedSubreddit: redditInfo.subreddit || undefined,
+          extractedUsername: redditInfo.username || undefined,
+          extractedTitle: redditInfo.title || undefined,
+          result: 'rate_limited',
+        });
+        return { success: false, message: 'Reddit rate limited - try later', mentionId };
+      } else if (result?.error === 'api_error') {
+        console.log('Reddit API error');
+        this.db.saveMention({
+          mentionId,
+          authorUsername: 'upload',
+          authorId: 'upload',
+          mentionText: 'Manual upload',
+          extractedSubreddit: redditInfo.subreddit || undefined,
+          extractedUsername: redditInfo.username || undefined,
+          extractedTitle: redditInfo.title || undefined,
+          result: 'api_error',
+        });
+        return { success: false, message: 'Reddit API error - try later', mentionId };
+      } else if (result && !result.error) {
+        console.log(`Found match: ${result.url}`);
+        this.db.saveMention({
+          mentionId,
+          authorUsername: 'upload',
+          authorId: 'upload',
+          mentionText: 'Manual upload',
+          extractedSubreddit: redditInfo.subreddit || undefined,
+          extractedUsername: redditInfo.username || undefined,
+          extractedTitle: redditInfo.title || undefined,
+          result: 'found',
+          redditUrl: result.url,
+        });
+        return { success: true, message: 'Found matching post', url: result.url, mentionId };
+      } else {
+        console.log('No matching post found');
+        this.db.saveMention({
+          mentionId,
+          authorUsername: 'upload',
+          authorId: 'upload',
+          mentionText: 'Manual upload',
+          extractedSubreddit: redditInfo.subreddit || undefined,
+          extractedUsername: redditInfo.username || undefined,
+          extractedTitle: redditInfo.title || undefined,
+          result: 'not_found',
+        });
+        return { success: false, message: 'No matching post found', mentionId };
+      }
+    } catch (error) {
+      console.error(`Error processing upload ${mentionId}:`, error);
+      this.db.saveMention({
+        mentionId,
+        authorUsername: 'upload',
+        authorId: 'upload',
+        mentionText: 'Manual upload',
+        result: 'error',
+      });
+      return { success: false, message: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`, mentionId };
+    }
+  }
+
   async reprocessMention(mentionId: string): Promise<{ success: boolean; message: string; url?: string }> {
     console.log(`Reprocessing mention ${mentionId}...`);
 

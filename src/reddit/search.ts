@@ -160,11 +160,16 @@ export class RedditSearch {
   async findRedditPost(info: RedditPostInfo): Promise<RedditSearchResult | null> {
     // Search strategies ordered by effectiveness
     // With OAuth we can use more strategies (60 req/min vs 10)
+    // Detect if this looks like a post (has title) vs a comment
+    const looksLikePost = !!info.title && info.title.length > 10;
+
     const strategies = [
       { name: 'titleInSubreddit', fn: () => this.searchByTitleInSubreddit(info) },
       { name: 'authorInSubreddit', fn: () => this.searchByAuthorInSubreddit(info) },
       { name: 'exactTitle', fn: () => this.searchExactTitle(info) },
       { name: 'globalWithAuthor', fn: () => this.searchGlobal(info) },
+      // Search user's posts before comments when we have a title (looking for a post, not comment)
+      ...(looksLikePost ? [{ name: 'userPosts', fn: () => this.searchUserPosts(info) }] : []),
       { name: 'userComments', fn: () => this.searchUserComments(info) },
     ];
 
@@ -413,6 +418,56 @@ export class RedditSearch {
     return bestMatch;
   }
 
+  private async searchUserPosts(info: RedditPostInfo): Promise<RedditSearchResult | null> {
+    // Skip if username is missing or generic
+    if (!info.username ||
+        ['redacted', 'deleted', '[deleted]', 'unknown'].includes(info.username.toLowerCase())) {
+      return null;
+    }
+
+    console.log(`Searching user posts for u/${info.username}...`);
+
+    // Fetch user's submissions
+    const url = `${REDDIT_BASE}/user/${sanitizeRedditName(info.username)}/submitted.json?sort=new&limit=100`;
+    const response = await this.fetchReddit<RedditSearchResponse>(url);
+
+    // Check if user doesn't exist (404)
+    if (!response && this.wasNotFound()) {
+      console.log(`User u/${info.username} not found (deleted or suspended)`);
+      return {
+        url: '',
+        title: '',
+        author: info.username,
+        subreddit: '',
+        matchConfidence: 0,
+        error: 'user_not_found',
+      };
+    }
+
+    // Check if forbidden (403)
+    if (!response && this.wasForbidden()) {
+      console.log(`User u/${info.username} profile is private or inaccessible (403)`);
+      return {
+        url: '',
+        title: '',
+        author: info.username,
+        subreddit: '',
+        matchConfidence: 0,
+        error: 'api_error',
+      };
+    }
+
+    if (!response?.data?.children?.length) {
+      console.log(`No posts found for user ${info.username}`);
+      return null;
+    }
+
+    console.log(`Found ${response.data.children.length} posts from u/${info.username}`);
+
+    // Use the same matching logic as other strategies
+    return this.findBestMatch(response.data.children.map((c: { data: RedditPost }) => c.data), info);
+  }
+
   private async searchUserComments(info: RedditPostInfo): Promise<RedditSearchResult | null> {
     // Skip if username is missing or generic
     if (!info.username ||
@@ -492,16 +547,34 @@ export class RedditSearch {
 
     console.log(`Found ${allComments.length} comments from u/${info.username}`);
 
+    // Check if bodySnippet is a removal/deletion message (not actual content)
+    const bodyLower = (info.bodySnippet || '').toLowerCase();
+    const isRemovalMessage = bodyLower.includes('removed by the moderators') ||
+                             bodyLower.includes('[removed]') ||
+                             bodyLower.includes('[deleted]') ||
+                             bodyLower.includes('this post has been removed') ||
+                             bodyLower.includes('this comment has been removed');
+
+    // If we have a title (looking for a post) and bodySnippet is just a removal message,
+    // don't search comments - the post itself is what we want, not a comment
+    if (info.title && info.title.length > 10 && isRemovalMessage) {
+      console.log('Skipping comment search - screenshot shows a removed post, not a comment');
+      return null;
+    }
+
     // Search through comments for matching text
-    const searchText = (info.title || '') + ' ' + (info.bodySnippet || '');
+    // If body is a removal message, only use title for matching
+    const effectiveBody = isRemovalMessage ? '' : (info.bodySnippet || '');
+    const searchText = (info.title || '') + ' ' + effectiveBody;
     const searchKeywords = this.extractKeywords(searchText);
     // Normalize: remove newlines/extra whitespace that OCR might introduce
-    const rawSnippet = (info.bodySnippet || info.title || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const rawSnippet = (effectiveBody || info.title || '').toLowerCase().replace(/\s+/g, ' ').trim();
 
 
 
-    // Lower threshold for short snippets (they're more likely to be partial matches)
-    const threshold = rawSnippet.length < 80 ? 0.2 : 0.3;
+    // Threshold for matching - require decent similarity to avoid false positives
+    // Higher threshold when we have a title (looking for post, not comment)
+    const threshold = info.title && info.title.length > 10 ? 0.45 : (rawSnippet.length < 80 ? 0.3 : 0.4);
 
     let bestMatch: RedditSearchResult | null = null;
     let bestScore = 0;
@@ -561,15 +634,18 @@ export class RedditSearch {
 
       if (score > bestScore && score > threshold) {
         bestScore = score;
+        // Only give confidence boost if we have a strong text match (containsMatch or high similarity)
+        // Don't boost weak matches just because they're from the right user
+        const confidenceBoost = containsMatch ? 0.3 : (score > 0.5 ? 0.15 : 0);
         bestMatch = {
           url: `https://www.reddit.com${comment.permalink}?context=3`,
           title: `Comment on: ${comment.link_title}`,
           author: comment.author,
           subreddit: comment.subreddit,
-          matchConfidence: Math.min(score + 0.2, 1), // Boost confidence since we matched user
+          matchConfidence: Math.min(score + confidenceBoost, 1),
           isComment: true,
         };
-        console.log(`  Found matching comment (score: ${score.toFixed(3)}): "${comment.body.substring(0, 60)}..."`);
+        console.log(`  Found matching comment (score: ${score.toFixed(3)}, boost: ${confidenceBoost.toFixed(2)}): "${comment.body.substring(0, 60)}..."`);
       }
     }
 

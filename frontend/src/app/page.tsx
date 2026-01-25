@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { RefreshCw, ExternalLink, Check, X, RotateCcw, Trash2 } from "lucide-react";
+import { RefreshCw, ExternalLink, Check, X, RotateCcw, Trash2, Upload } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
 const WS_URL = API_URL.replace(/^http/, "ws") + "/ws";
@@ -44,8 +44,11 @@ export default function Dashboard() {
   const [toast, setToast] = useState<string | null>(null);
   const [reprocessingId, setReprocessingId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
@@ -96,6 +99,15 @@ export default function Dashboard() {
               setTimeout(() => setToast(null), 3000);
             }
             break;
+          case "upload_result":
+            setUploading(false);
+            if (message.data.success) {
+              setToast("found reddit link!");
+            } else {
+              setToast(message.data.message || "not found");
+            }
+            setTimeout(() => setToast(null), 3000);
+            break;
         }
       } catch (err) {
         console.error("WebSocket parse error:", err);
@@ -140,6 +152,50 @@ export default function Dashboard() {
     }
   };
 
+  const handleFileUpload = (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      setToast("please upload an image file");
+      setTimeout(() => setToast(null), 3000);
+      return;
+    }
+
+    if (wsRef.current?.readyState !== WebSocket.OPEN) {
+      setToast("not connected");
+      setTimeout(() => setToast(null), 3000);
+      return;
+    }
+
+    setUploading(true);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = (reader.result as string).split(",")[1];
+      wsRef.current?.send(JSON.stringify({ type: "upload", imageData: base64 }));
+    };
+    reader.onerror = () => {
+      setUploading(false);
+      setToast("failed to read file");
+      setTimeout(() => setToast(null), 3000);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file) handleFileUpload(file);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+  };
+
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);
     return date.toLocaleDateString(undefined, { month: "short", day: "numeric" }) +
@@ -181,6 +237,46 @@ export default function Dashboard() {
 
       {/* Main content */}
       <main className="px-4 py-4 max-w-2xl mx-auto">
+        {/* Upload area */}
+        <div
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onClick={() => !uploading && fileInputRef.current?.click()}
+          className={`mb-4 border-2 border-dashed rounded-md p-3 flex items-center justify-center gap-2 cursor-pointer transition-colors ${
+            dragOver
+              ? "border-primary bg-primary/5"
+              : uploading
+              ? "border-amber-500/50 bg-amber-500/5"
+              : "border-border hover:border-muted-foreground/50"
+          }`}
+        >
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleFileUpload(file);
+              e.target.value = "";
+            }}
+          />
+          {uploading ? (
+            <>
+              <RefreshCw className="h-4 w-4 text-amber-500 animate-spin" />
+              <span className="text-xs text-amber-500">searching reddit...</span>
+            </>
+          ) : (
+            <>
+              <Upload className="h-4 w-4 text-muted-foreground" />
+              <span className="text-xs text-muted-foreground">
+                drop screenshot or click to upload
+              </span>
+            </>
+          )}
+        </div>
+
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
             link requests
@@ -292,17 +388,33 @@ export default function Dashboard() {
                 </div>
 
                 {/* Action */}
-                <div className="flex-shrink-0 flex items-center gap-1">
+                <div className="flex-shrink-0 flex flex-col items-end gap-1">
                   {mention.reddit_url ? (
-                    <a
-                      href={mention.reddit_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-[#FF4500] hover:bg-[#E03D00] text-white transition-colors"
-                    >
-                      <ExternalLink className="h-3 w-3" />
-                      reddit
-                    </a>
+                    <>
+                      <a
+                        href={mention.reddit_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-[#FF4500] hover:bg-[#E03D00] text-white transition-colors"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                        reddit
+                      </a>
+                      {reprocessingId === mention.mention_id ? (
+                        <span className="text-[10px] text-amber-500 flex items-center gap-1">
+                          <RefreshCw className="h-2.5 w-2.5 animate-spin" />
+                          searching...
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => reprocessMention(mention.mention_id)}
+                          disabled={reprocessingId !== null}
+                          className="text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                          find again
+                        </button>
+                      )}
+                    </>
                   ) : mention.result === "processing" || reprocessingId === mention.mention_id ? (
                     <div className="w-8 h-8 flex items-center justify-center">
                       <RefreshCw className="h-3.5 w-3.5 text-amber-500 animate-spin" />

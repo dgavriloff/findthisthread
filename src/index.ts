@@ -164,6 +164,24 @@ async function main(): Promise<void> {
               // Broadcast updated mentions to all clients
               broadcast('mentions', db.getAllMentions(50));
             }
+          } else if (data.type === 'upload' && data.imageData) {
+            // Handle uploaded image (base64 encoded)
+            try {
+              const imageBuffer = Buffer.from(data.imageData, 'base64');
+              // Broadcast updated mentions immediately to show "processing" state
+              broadcast('mentions', db.getAllMentions(50));
+              handler.handleUpload(imageBuffer).then(result => {
+                ws.send(JSON.stringify({ type: 'upload_result', data: result, timestamp: Date.now() }));
+                // Broadcast updated mentions after processing
+                broadcast('mentions', db.getAllMentions(50));
+              });
+            } catch (e) {
+              ws.send(JSON.stringify({
+                type: 'upload_result',
+                data: { success: false, message: 'Invalid image data' },
+                timestamp: Date.now()
+              }));
+            }
           }
         } catch (e) {
           // Ignore invalid messages
