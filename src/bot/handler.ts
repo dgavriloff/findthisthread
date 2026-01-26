@@ -5,6 +5,19 @@ import { MentionsDB } from '../db/mentions';
 import { TelegramClient } from '../telegram/client';
 import { Mention } from '../twitter/types';
 
+const REPLY_TEMPLATES = [
+  (user: string, url: string) => `@${user} Found it! ${url}`,
+  (user: string, url: string) => `@${user} Here you go: ${url}`,
+  (user: string, url: string) => `@${user} Here it is: ${url}`,
+  (user: string, url: string) => `@${user} Got it! ${url}`,
+  (user: string, url: string) => `@${user} There you go: ${url}`,
+];
+
+function getRandomReply(user: string, url: string): string {
+  const template = REPLY_TEMPLATES[Math.floor(Math.random() * REPLY_TEMPLATES.length)];
+  return template(user, url);
+}
+
 export class BotHandler {
   private twitter: TwitterClient;
   private vision: VisionExtractor;
@@ -590,7 +603,7 @@ export class BotHandler {
     extractedTitle?: string,
     extractedSubreddit?: string
   ): Promise<{ success: boolean; tweetId?: string; error?: string; skipped?: boolean }> {
-    const defaultReply = `@${authorUsername} Found it! ${redditUrl}`;
+    const defaultReply = getRandomReply(authorUsername, redditUrl);
     let replyText = defaultReply;
 
     // If Telegram is configured, request approval
@@ -603,6 +616,7 @@ export class BotHandler {
           extractedTitle,
           extractedSubreddit,
           tweetUrl,
+          defaultReply,
         });
 
         if (!approval.approved) {

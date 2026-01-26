@@ -68,8 +68,9 @@ export class TelegramClient {
     extractedTitle?: string;
     extractedSubreddit?: string;
     tweetUrl: string;
+    defaultReply: string;
   }): Promise<{ approved: boolean; customText?: string }> {
-    const defaultReply = `@${context.mentionAuthor} Found it! ${context.redditUrl}`;
+    const defaultReply = context.defaultReply;
 
     // Build the message
     let message = `<b>New mention from @${context.mentionAuthor}</b>\n\n`;

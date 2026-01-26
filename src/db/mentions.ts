@@ -77,6 +77,9 @@ export class MentionsDB {
 
     // Add reply tracking columns
     this.migrateAddReplyColumns();
+
+    // Mark old found mentions as pre-existing (one-time fix)
+    this.migrateMarkOldReplies();
   }
 
   private migrateNotFoundRetriable(): void {
@@ -101,7 +104,25 @@ export class MentionsDB {
       console.log('Adding reply tracking columns to mentions table...');
       this.db.exec(`ALTER TABLE mentions ADD COLUMN reply_tweet_id TEXT`);
       this.db.exec(`ALTER TABLE mentions ADD COLUMN reply_sent_at TEXT`);
+
       console.log('Migration complete: reply columns added');
+    }
+  }
+
+  private migrateMarkOldReplies(): void {
+    // One-time migration: mark old 'found' mentions that don't have reply_tweet_id
+    // These are from before the auto-reply feature was added
+    const result = this.db.prepare(`
+      UPDATE mentions
+      SET reply_tweet_id = 'pre_existing'
+      WHERE result = 'found'
+        AND reddit_url IS NOT NULL
+        AND reply_tweet_id IS NULL
+        AND mention_id NOT LIKE 'upload_%'
+    `).run();
+
+    if (result.changes > 0) {
+      console.log(`Marked ${result.changes} old mentions as pre_existing (won't auto-reply)`);
     }
   }
 
