@@ -4,7 +4,7 @@ import { RedditSearch } from './reddit/search';
 import { MentionsDB } from './db/mentions';
 import { BotHandler } from './bot/handler';
 import { TelegramClient } from './telegram/client';
-import { createServer, BotState } from './web/server';
+import { createServer, BotState, WebhookConfig } from './web/server';
 import type { ServerWebSocket } from 'bun';
 
 // Load environment variables
@@ -116,8 +116,23 @@ async function main(): Promise<void> {
     console.log('  Set TWITTER_BOT_EMAIL, TWITTER_BOT_PASSWORD, and TWITTER_PROXY to enable replies');
   }
 
+  // Create webhook config for twitterapi.io
+  const webhookConfig: WebhookConfig = {
+    apiKey: TWITTER_API_KEY || '',
+    onMention: async (mention) => {
+      await handler.handleMention(mention, () => {
+        broadcast('mentions', db.getAllMentions(50));
+      });
+      broadcast('mentions', db.getAllMentions(50));
+      broadcast('status', { ...botState, stats: db.getStats(), currentTime: Date.now(), timeUntilNextCheck: Math.max(0, botState.nextCheckTime - Date.now()) });
+    },
+    onBroadcast: () => {
+      broadcast('mentions', db.getAllMentions(50));
+    },
+  };
+
   // Create Hono app for REST endpoints
-  const app = createServer(db, () => botState, triggerRefresh, (mentionId) => handler.reprocessMention(mentionId));
+  const app = createServer(db, () => botState, triggerRefresh, (mentionId) => handler.reprocessMention(mentionId), webhookConfig);
 
   console.log(`Starting API server on port ${PORT}...`);
 

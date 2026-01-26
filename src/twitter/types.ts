@@ -28,3 +28,27 @@ export interface TwitterApiResponse<T> {
   data?: T;
   error?: string;
 }
+
+// twitterapi.io webhook payload
+export interface WebhookTweet {
+  id: string;
+  text: string;
+  author?: {
+    id?: string;
+    username?: string;
+    userName?: string;  // fallback for API inconsistency
+    name?: string;
+  };
+  inReplyToId?: string;
+  in_reply_to_status_id?: string;
+  createdAt?: string;
+  created_at?: string;
+}
+
+export interface WebhookPayload {
+  event_type: string;
+  rule_id?: string;
+  rule_tag?: string;
+  tweets: WebhookTweet[];
+  timestamp: string | number;
+}
