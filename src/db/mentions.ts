@@ -231,16 +231,19 @@ export class MentionsDB {
   }
 
   getMentionsNeedingReply(limit: number = 10): MentionRecord[] {
+    // Only retry mentions from the last hour to prevent duplicate replies on redeploy
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     const stmt = this.db.prepare(`
       SELECT * FROM mentions
       WHERE result = 'found'
         AND reddit_url IS NOT NULL
         AND reply_tweet_id IS NULL
         AND mention_id NOT LIKE 'upload_%'
+        AND processed_at > ?
       ORDER BY processed_at ASC
       LIMIT ?
     `);
-    return stmt.all(limit) as MentionRecord[];
+    return stmt.all(oneHourAgo, limit) as MentionRecord[];
   }
 
   // Legacy method for compatibility
